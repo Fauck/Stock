@@ -8,54 +8,41 @@
 import SwiftUI
 import SwiftData
 
+/// 主視圖：使用 TabView 整合四個主要頁面，溫暖日誌風格
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @State private var selectedTab = 0
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
+        TabView(selection: $selectedTab) {
+            CalendarView()
+                .tabItem {
+                    Label("行事曆", systemImage: "calendar.badge.plus")
                 }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-        } detail: {
-            Text("Select an item")
-        }
-    }
+                .tag(0)
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
+            PortfolioListView()
+                .tabItem {
+                    Label("持有庫存", systemImage: "leaf.fill")
+                }
+                .tag(1)
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
+            TransactionHistoryView()
+                .tabItem {
+                    Label("交易紀錄", systemImage: "book.closed.fill")
+                }
+                .tag(2)
+
+            SoldRecordsView()
+                .tabItem {
+                    Label("已實現損益", systemImage: "checkmark.seal.fill")
+                }
+                .tag(3)
         }
+        .tint(AppColor.primary)
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(for: Investment.self, inMemory: true)
 }
