@@ -114,6 +114,54 @@ final class Investment {
         }
     }
 
+    /// 刪除此筆紀錄，並清除相關的部分賣出拆分紀錄
+    /// - 若為原始買入紀錄：同時刪除所有由此紀錄拆分出的 partialSellRecord
+    /// - 若為部分賣出拆分紀錄：將賣出數量歸還給原始紀錄
+    static func deleteInvestment(_ investment: Investment, context: ModelContext) {
+        if investment.isPartialSellRecord {
+            // 這是拆分紀錄，找到同標的、同買入日期、同買入價格的原始紀錄，歸還數量
+            let ticker = investment.ticker
+            let buyDate = investment.buyDate
+            let buyPrice = investment.buyPrice
+            let soldQty = investment.sellQuantity ?? investment.originalQuantity
+
+            let descriptor = FetchDescriptor<Investment>(
+                predicate: #Predicate<Investment> {
+                    $0.ticker == ticker &&
+                    $0.buyDate == buyDate &&
+                    $0.buyPrice == buyPrice &&
+                    !$0.isPartialSellRecord &&
+                    !$0.isClosed
+                }
+            )
+            if let originals = try? context.fetch(descriptor),
+               let original = originals.first {
+                original.quantity += soldQty
+            }
+            context.delete(investment)
+        } else {
+            // 這是原始買入紀錄，同時刪除所有由它拆分出的紀錄
+            let ticker = investment.ticker
+            let buyDate = investment.buyDate
+            let buyPrice = investment.buyPrice
+
+            let descriptor = FetchDescriptor<Investment>(
+                predicate: #Predicate<Investment> {
+                    $0.ticker == ticker &&
+                    $0.buyDate == buyDate &&
+                    $0.buyPrice == buyPrice &&
+                    $0.isPartialSellRecord
+                }
+            )
+            if let partials = try? context.fetch(descriptor) {
+                for partial in partials {
+                    context.delete(partial)
+                }
+            }
+            context.delete(investment)
+        }
+    }
+
     /// 處理賣出邏輯
     /// - 全部賣出：記錄賣出資訊，標記為已平倉
     /// - 部分賣出：拆分出一筆新的已平倉紀錄，原紀錄扣減數量

@@ -10,6 +10,7 @@ import SwiftData
 
 /// 買入紀錄流水帳：日誌風格卡片，支援日期區間篩選
 struct TransactionHistoryView: View {
+    @Environment(\.modelContext) private var modelContext
     @Query(filter: #Predicate<Investment> { !$0.isPartialSellRecord },
            sort: \Investment.buyDate, order: .reverse)
     private var allInvestments: [Investment]
@@ -17,6 +18,8 @@ struct TransactionHistoryView: View {
     @State private var selectedFilter: DateFilterOption = .all
     @State private var customStartDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var customEndDate: Date = Date()
+    @State private var investmentToDelete: Investment?
+    @State private var showingDeleteAlert = false
 
     var body: some View {
         NavigationStack {
@@ -40,6 +43,16 @@ struct TransactionHistoryView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbarBackground(AppColor.primary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .alert("確認刪除", isPresented: $showingDeleteAlert, presenting: investmentToDelete) { investment in
+                Button("刪除", role: .destructive) {
+                    withAnimation {
+                        Investment.deleteInvestment(investment, context: modelContext)
+                    }
+                }
+                Button("取消", role: .cancel) {}
+            } message: { investment in
+                Text("確定要刪除 \(investment.ticker) 的買入紀錄嗎？相關的部分賣出紀錄也會一併刪除。")
+            }
         }
     }
 
@@ -170,6 +183,14 @@ struct TransactionHistoryView: View {
                 // 逐筆紀錄
                 ForEach(filteredInvestments) { investment in
                     transactionCard(for: investment)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                investmentToDelete = investment
+                                showingDeleteAlert = true
+                            } label: {
+                                Label("刪除紀錄", systemImage: "trash")
+                            }
+                        }
                         .padding(.horizontal, 16)
                 }
             }

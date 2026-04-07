@@ -89,6 +89,45 @@ extension View {
     }
 }
 
+// MARK: - 鍵盤收合修飾器
+
+/// 統一的鍵盤收合邏輯：滑動收合、點擊空白處收合、鍵盤上方「完成」按鈕
+struct KeyboardDismissModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .scrollDismissesKeyboard(.interactively)
+            .background(keyboardDismissTapArea)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("完成") { hideKeyboard() }
+                }
+            }
+    }
+
+    /// 使用低優先級手勢，只在子視圖不處理點擊時才收合鍵盤
+    private var keyboardDismissTapArea: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .onTapGesture { hideKeyboard() }
+    }
+}
+
+/// 全域鍵盤收合工具
+func hideKeyboard() {
+    UIApplication.shared.sendAction(
+        #selector(UIResponder.resignFirstResponder),
+        to: nil, from: nil, for: nil
+    )
+}
+
+extension View {
+    /// 為包含輸入欄位的頁面加入鍵盤收合功能（滑動、點擊、完成按鈕）
+    func keyboardDismissable() -> some View {
+        modifier(KeyboardDismissModifier())
+    }
+}
+
 // MARK: - 筆記本底線風格 TextEditor
 
 /// 筆記本風格的文字輸入框，帶有底線裝飾
@@ -98,6 +137,9 @@ struct NotebookTextField: View {
     var lineLimit: Int = 4
     var icon: String = "pencil.line"
     var iconColor: Color = AppColor.primary
+    var isFocused: FocusState<Bool>.Binding?
+
+    @FocusState private var internalFocus: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -129,6 +171,7 @@ struct NotebookTextField: View {
                     .foregroundStyle(AppColor.textMain)
                     .lineLimit(1...lineLimit)
                     .padding(.top, 4)
+                    .focused(isFocused ?? $internalFocus)
             }
         }
         .padding(12)

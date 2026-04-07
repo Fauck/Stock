@@ -26,6 +26,10 @@ struct PortfolioListView: View {
     @State private var selectedGroup: PortfolioGroup?
     @State private var showingGroupSellSheet = false
 
+    // 刪除
+    @State private var investmentToDelete: Investment?
+    @State private var showingDeleteAlert = false
+
     /// 將查詢結果群組化
     private var groups: [PortfolioGroup] {
         PortfolioGroup.buildGroups(from: investments)
@@ -57,6 +61,16 @@ struct PortfolioListView: View {
                 if let group = selectedGroup {
                     GroupSellView(group: group)
                 }
+            }
+            .alert("確認刪除", isPresented: $showingDeleteAlert, presenting: investmentToDelete) { investment in
+                Button("刪除", role: .destructive) {
+                    withAnimation {
+                        Investment.deleteInvestment(investment, context: modelContext)
+                    }
+                }
+                Button("取消", role: .cancel) {}
+            } message: { investment in
+                Text("確定要刪除 \(investment.ticker) 的買入紀錄嗎？相關的部分賣出紀錄也會一併刪除。")
             }
         }
     }
@@ -94,6 +108,7 @@ struct PortfolioListView: View {
             }
             .padding(.vertical, 16)
         }
+        .keyboardDismissable()
     }
 
     // MARK: - 總覽卡片
@@ -251,6 +266,14 @@ struct PortfolioListView: View {
             DisclosureGroup {
                 ForEach(group.investments) { investment in
                     detailRow(for: investment)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                investmentToDelete = investment
+                                showingDeleteAlert = true
+                            } label: {
+                                Label("刪除紀錄", systemImage: "trash")
+                            }
+                        }
                 }
             } label: {
                 HStack(spacing: 4) {

@@ -21,27 +21,37 @@ struct AddInvestmentView: View {
     @State private var buyReason: String = ""
     @State private var showingAlert = false
     @State private var alertMessage = ""
+    @FocusState private var isReasonFocused: Bool
 
     var body: some View {
         NavigationStack {
             ZStack {
                 AppColor.background.ignoresSafeArea()
 
-                ScrollView {
-                    VStack(spacing: 16) {
-                        // MARK: - 買入日期
-                        dateCard
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            // MARK: - 買入日期
+                            dateCard
 
-                        // MARK: - 標的 & 交易細節
-                        tradeInfoCard
+                            // MARK: - 標的 & 交易細節
+                            tradeInfoCard
 
-                        // MARK: - 買入理由
-                        reasonCard
+                            // MARK: - 買入理由
+                            reasonCard
+                                .id("reasonCard")
 
-                        // MARK: - 預覽成本
-                        costPreviewCard
+                            // MARK: - 預覽成本
+                            costPreviewCard
+                        }
+                        .padding(16)
                     }
-                    .padding(16)
+                    .keyboardDismissable()
+                    .onChange(of: isReasonFocused) { _, focused in
+                        if focused {
+                            withAnimation { proxy.scrollTo("reasonCard", anchor: .bottom) }
+                        }
+                    }
                 }
             }
             .navigationTitle("新增買入紀錄")
@@ -158,7 +168,8 @@ struct AddInvestmentView: View {
                 text: $buyReason,
                 lineLimit: 4,
                 icon: "pencil.line",
-                iconColor: AppColor.primary
+                iconColor: AppColor.primary,
+                isFocused: $isReasonFocused
             )
         }
         .cardStyle()

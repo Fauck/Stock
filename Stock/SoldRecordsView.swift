@@ -32,6 +32,8 @@ struct SoldRecordsView: View {
     @State private var selectedFilter: DateFilterOption = .all
     @State private var customStartDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var customEndDate: Date = Date()
+    @State private var investmentToDelete: Investment?
+    @State private var showingDeleteAlert = false
 
     var body: some View {
         NavigationStack {
@@ -54,6 +56,20 @@ struct SoldRecordsView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbarBackground(AppColor.primary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .alert("確認刪除", isPresented: $showingDeleteAlert, presenting: investmentToDelete) { investment in
+                Button("刪除", role: .destructive) {
+                    withAnimation {
+                        Investment.deleteInvestment(investment, context: modelContext)
+                    }
+                }
+                Button("取消", role: .cancel) {}
+            } message: { investment in
+                if investment.isPartialSellRecord {
+                    Text("確定要刪除 \(investment.ticker) 的賣出紀錄嗎？賣出數量將歸還至原始買入紀錄。")
+                } else {
+                    Text("確定要刪除 \(investment.ticker) 的已平倉紀錄嗎？")
+                }
+            }
         }
     }
 
@@ -196,6 +212,14 @@ struct SoldRecordsView: View {
                 // 個別紀錄
                 ForEach(filteredInvestments) { investment in
                     soldRecordCard(for: investment)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                investmentToDelete = investment
+                                showingDeleteAlert = true
+                            } label: {
+                                Label("刪除紀錄", systemImage: "trash")
+                            }
+                        }
                         .padding(.horizontal, 16)
                 }
             }

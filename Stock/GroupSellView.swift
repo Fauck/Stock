@@ -20,30 +20,40 @@ struct GroupSellView: View {
     @State private var sellReason: String = ""
     @State private var showingAlert = false
     @State private var alertMessage = ""
+    @FocusState private var isReasonFocused: Bool
 
     var body: some View {
         NavigationStack {
             ZStack {
                 AppColor.background.ignoresSafeArea()
 
-                ScrollView {
-                    VStack(spacing: 16) {
-                        // MARK: - 標的彙整資訊
-                        infoCard
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            // MARK: - 標的彙整資訊
+                            infoCard
 
-                        // MARK: - 賣出輸入
-                        sellInputCard
+                            // MARK: - 賣出輸入
+                            sellInputCard
 
-                        // MARK: - 賣出理由
-                        reasonCard
+                            // MARK: - 賣出理由
+                            reasonCard
+                                .id("reasonCard")
 
-                        // MARK: - 預覽損益
-                        profitPreviewCard
+                            // MARK: - 預覽損益
+                            profitPreviewCard
 
-                        // MARK: - FIFO 說明
-                        fifoNote
+                            // MARK: - FIFO 說明
+                            fifoNote
+                        }
+                        .padding(16)
                     }
-                    .padding(16)
+                    .keyboardDismissable()
+                    .onChange(of: isReasonFocused) { _, focused in
+                        if focused {
+                            withAnimation { proxy.scrollTo("reasonCard", anchor: .bottom) }
+                        }
+                    }
                 }
             }
             .navigationTitle("賣出 \(group.ticker)")
@@ -181,7 +191,8 @@ struct GroupSellView: View {
             text: $sellReason,
             lineLimit: 4,
             icon: "text.quote",
-            iconColor: AppColor.softUp
+            iconColor: AppColor.softUp,
+            isFocused: $isReasonFocused
         )
         .cardStyle()
     }
