@@ -162,6 +162,69 @@ final class Investment {
         }
     }
 
+    // MARK: - CSV 匯出
+
+    /// CSV 表頭
+    static let csvHeader = "標的,買入日期,買入價格,原始數量,目前數量,狀態,賣出日期,賣出價格,賣出數量,已實現損益,買入理由,賣出理由"
+
+    /// 將單筆紀錄轉為 CSV 行
+    var csvRow: String {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy/MM/dd"
+
+        let status = statusText
+        let buyDateStr = df.string(from: buyDate)
+        let sellDateStr = sellDate.map { df.string(from: $0) } ?? ""
+        let sellPriceStr = sellPrice.map { String(format: "%.2f", $0) } ?? ""
+        let sellQtyStr = sellQuantity.map { String(format: "%.0f", $0) } ?? ""
+        let plStr = isClosed ? String(format: "%.0f", realizedProfitLoss) : ""
+
+        // 將理由中的逗號與換行替換，避免破壞 CSV 格式
+        func escape(_ s: String) -> String {
+            let cleaned = s.replacingOccurrences(of: "\n", with: " ")
+            return cleaned.contains(",") || cleaned.contains("\"")
+                ? "\"\(cleaned.replacingOccurrences(of: "\"", with: "\"\""))\""
+                : cleaned
+        }
+
+        return [
+            escape(ticker),
+            buyDateStr,
+            String(format: "%.2f", buyPrice),
+            String(format: "%.0f", originalQuantity),
+            String(format: "%.0f", quantity),
+            status,
+            sellDateStr,
+            sellPriceStr,
+            sellQtyStr,
+            plStr,
+            escape(buyReason),
+            escape(sellReason)
+        ].joined(separator: ",")
+    }
+
+    /// 將所有紀錄匯出為 CSV 檔案 URL
+    static func exportCSV(from investments: [Investment]) -> URL? {
+        let csv = csvHeader + "\n" + investments.map(\.csvRow).joined(separator: "\n")
+
+        let tempDir = FileManager.default.temporaryDirectory
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd_HHmmss"
+        let fileName = "投資紀錄_\(df.string(from: Date())).csv"
+        let fileURL = tempDir.appendingPathComponent(fileName)
+
+        // 使用 BOM + UTF-8 確保 Excel 正確辨識中文
+        let bom = "\u{FEFF}"
+        guard let data = (bom + csv).data(using: .utf8) else { return nil }
+
+        do {
+            try data.write(to: fileURL)
+            return fileURL
+        } catch {
+            return nil
+        }
+    }
+
     /// 處理賣出邏輯
     /// - 全部賣出：記錄賣出資訊，標記為已平倉
     /// - 部分賣出：拆分出一筆新的已平倉紀錄，原紀錄扣減數量

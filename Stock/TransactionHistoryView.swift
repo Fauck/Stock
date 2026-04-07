@@ -15,11 +15,17 @@ struct TransactionHistoryView: View {
            sort: \Investment.buyDate, order: .reverse)
     private var allInvestments: [Investment]
 
+    /// 所有紀錄（含拆分），用於 CSV 匯出
+    @Query(sort: \Investment.buyDate, order: .reverse)
+    private var allRecordsForExport: [Investment]
+
     @State private var selectedFilter: DateFilterOption = .all
     @State private var customStartDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var customEndDate: Date = Date()
     @State private var investmentToDelete: Investment?
     @State private var showingDeleteAlert = false
+    @State private var csvFileURL: URL?
+    @State private var showingShareSheet = false
 
     var body: some View {
         NavigationStack {
@@ -43,6 +49,24 @@ struct TransactionHistoryView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbarBackground(AppColor.primary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        if let url = Investment.exportCSV(from: allRecordsForExport) {
+                            csvFileURL = url
+                            showingShareSheet = true
+                        }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+            }
+            .sheet(isPresented: $showingShareSheet) {
+                if let url = csvFileURL {
+                    ShareSheetView(items: [url])
+                        .presentationDetents([.medium, .large])
+                }
+            }
             .alert("確認刪除", isPresented: $showingDeleteAlert, presenting: investmentToDelete) { investment in
                 Button("刪除", role: .destructive) {
                     withAnimation {

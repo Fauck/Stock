@@ -231,3 +231,16 @@ struct WarmStatusBadge: View {
             .clipShape(Capsule())
     }
 }
+
+// MARK: - 系統分享表單
+
+/// 包裝 UIActivityViewController 供 SwiftUI 使用
+struct ShareSheetView: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
