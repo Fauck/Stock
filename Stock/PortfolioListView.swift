@@ -18,6 +18,9 @@ struct PortfolioListView: View {
     /// 以 ticker 為 key 儲存使用者輸入的目前價格
     @State private var currentPrices: [String: String] = [:]
 
+    /// 目前展開的群組 ticker
+    @State private var expandedTicker: String?
+
     // 單筆賣出
     @State private var selectedInvestment: Investment?
     @State private var showingSellSheet = false
@@ -95,7 +98,7 @@ struct PortfolioListView: View {
 
     private var portfolioList: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: 10) {
                 // 總覽卡片
                 totalSummaryCard
                     .padding(.horizontal)
@@ -106,7 +109,7 @@ struct PortfolioListView: View {
                         .padding(.horizontal)
                 }
             }
-            .padding(.vertical, 16)
+            .padding(.vertical, 12)
         }
         .keyboardDismissable()
     }
@@ -177,168 +180,189 @@ struct PortfolioListView: View {
     // MARK: - 群組卡片
 
     private func groupCard(for group: PortfolioGroup) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // 標題列
-            HStack {
-                Text(group.ticker)
-                    .font(.warmTitle())
-                    .foregroundStyle(AppColor.primary)
-                Spacer()
-                Text(String(format: "%.0f 股", group.totalQuantity))
-                    .font(.warmSubheadline())
-                    .foregroundStyle(AppColor.textSecondary)
-            }
+        let isExpanded = expandedTicker == group.ticker
+        let currentPrice: Double? = {
+            guard let str = currentPrices[group.ticker], let p = Double(str), p > 0 else { return nil }
+            return p
+        }()
 
-            // 資訊徽章列
-            HStack(spacing: 8) {
-                WarmInfoBadge(title: "均價", value: String(format: "$%.2f", group.weightedAverageCost))
-                Spacer()
-                WarmInfoBadge(title: "總投入", value: String(format: "$%.0f", group.totalInvested))
-                Spacer()
-                if let priceStr = currentPrices[group.ticker],
-                   let price = Double(priceStr), price > 0 {
-                    let pl = group.unrealizedProfitLoss(currentPrice: price)
-                    let pct = group.returnPercentage(currentPrice: price)
-                    VStack(spacing: 2) {
-                        Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f")")
-                            .font(.warmCaption())
-                            .fontWeight(.semibold)
-                            .foregroundStyle(Color.profitLossColor(pl))
-                        Text("\(pct >= 0 ? "+" : "")\(pct, specifier: "%.2f")%")
-                            .font(.warmCaption2())
-                            .foregroundStyle(Color.profitLossColor(pct))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(AppColor.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                } else {
-                    WarmInfoBadge(title: "筆數", value: "\(group.investments.count) 筆")
-                }
-            }
-
-            AppColor.divider.frame(height: 1)
-
-            // 現價輸入
-            HStack(spacing: 12) {
-                Image(systemName: "pencil.and.list.clipboard")
-                    .font(.warmCaption())
-                    .foregroundStyle(AppColor.primary)
-                Text("目前股價")
-                    .font(.warmCaption())
-                    .foregroundStyle(AppColor.textSecondary)
-                TextField(
-                    "輸入現價",
-                    text: Binding(
-                        get: { currentPrices[group.ticker] ?? "" },
-                        set: { currentPrices[group.ticker] = $0 }
-                    )
-                )
-                .keyboardType(.decimalPad)
-                .font(.warmBody())
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(AppColor.background)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .frame(maxWidth: 120)
-                Spacer()
-            }
-
-            // 整批賣出按鈕
+        return VStack(alignment: .leading, spacing: 0) {
+            // ── 摘要列（始終顯示）──
             Button {
-                selectedGroup = group
-                showingGroupSellSheet = true
-            } label: {
-                HStack {
-                    Image(systemName: "arrow.right.circle.fill")
-                    Text("整批賣出 \(group.ticker)")
-                        .fontWeight(.medium)
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    expandedTicker = isExpanded ? nil : group.ticker
                 }
-                .font(.warmCaption())
-                .foregroundStyle(AppColor.softUp)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(AppColor.softUp.opacity(0.12))
-                .clipShape(Capsule())
-            }
+            } label: {
+                HStack(spacing: 12) {
+                    // 左：標的代號
+                    Text(group.ticker)
+                        .font(.warmHeadline())
+                        .foregroundStyle(AppColor.primary)
+                        .frame(minWidth: 50, alignment: .leading)
 
-            // 展開明細
-            DisclosureGroup {
-                ForEach(group.investments) { investment in
-                    detailRow(for: investment)
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                investmentToDelete = investment
-                                showingDeleteAlert = true
-                            } label: {
-                                Label("刪除紀錄", systemImage: "trash")
-                            }
+                    // 中：股數 + 均價
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(format: "%.0f 股", group.totalQuantity))
+                            .font(.warmCaption())
+                            .foregroundStyle(AppColor.textMain)
+                        Text(String(format: "均價 $%.2f", group.weightedAverageCost))
+                            .font(.warmCaption2())
+                            .foregroundStyle(AppColor.textSecondary)
+                    }
+
+                    Spacer()
+
+                    // 右：損益或總投入
+                    if let price = currentPrice {
+                        let pl = group.unrealizedProfitLoss(currentPrice: price)
+                        let pct = group.returnPercentage(currentPrice: price)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f")")
+                                .font(.warmCaption())
+                                .fontWeight(.semibold)
+                                .foregroundStyle(Color.profitLossColor(pl))
+                            Text("\(pct >= 0 ? "+" : "")\(pct, specifier: "%.1f")%")
+                                .font(.warmCaption2())
+                                .foregroundStyle(Color.profitLossColor(pct))
                         }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "doc.text")
+                    } else {
+                        Text(String(format: "$%.0f", group.totalInvested))
+                            .font(.warmCaption())
+                            .fontWeight(.medium)
+                            .foregroundStyle(AppColor.textMain)
+                    }
+
+                    // 展開指示箭頭
+                    Image(systemName: "chevron.right")
                         .font(.warmCaption2())
-                    Text("買入明細（\(group.investments.count) 筆）")
-                        .font(.warmCaption())
+                        .foregroundStyle(AppColor.textSecondary.opacity(0.5))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
-                .foregroundStyle(AppColor.primary)
+                .padding(14)
+                .contentShape(Rectangle())
             }
-            .tint(AppColor.primary)
+            .buttonStyle(.plain)
+
+            // ── 展開的詳細內容 ──
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 12) {
+                    AppColor.divider.frame(height: 1)
+                        .padding(.horizontal, 14)
+
+                    // 資訊徽章列
+                    HStack {
+                        WarmInfoBadge(title: "均價", value: String(format: "$%.2f", group.weightedAverageCost))
+                        Spacer()
+                        WarmInfoBadge(title: "總投入", value: String(format: "$%.0f", group.totalInvested))
+                        Spacer()
+                        WarmInfoBadge(title: "筆數", value: "\(group.investments.count) 筆")
+                    }
+                    .padding(.horizontal, 14)
+
+                    // 現價輸入
+                    HStack(spacing: 10) {
+                        Image(systemName: "pencil.and.list.clipboard")
+                            .font(.warmCaption())
+                            .foregroundStyle(AppColor.primary)
+                        Text("現價")
+                            .font(.warmCaption())
+                            .foregroundStyle(AppColor.textSecondary)
+                        TextField(
+                            "輸入",
+                            text: Binding(
+                                get: { currentPrices[group.ticker] ?? "" },
+                                set: { currentPrices[group.ticker] = $0 }
+                            )
+                        )
+                        .keyboardType(.decimalPad)
+                        .font(.warmBody())
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(AppColor.background)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .frame(maxWidth: 100)
+                        Spacer()
+
+                        // 整批賣出
+                        Button {
+                            selectedGroup = group
+                            showingGroupSellSheet = true
+                        } label: {
+                            Text("整批賣出")
+                                .font(.warmCaption2())
+                                .fontWeight(.medium)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .foregroundStyle(AppColor.softUp)
+                                .background(AppColor.softUp.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                    }
+                    .padding(.horizontal, 14)
+
+                    // 買入明細
+                    VStack(spacing: 6) {
+                        ForEach(group.investments) { investment in
+                            detailRow(for: investment)
+                                .contextMenu {
+                                    Button(role: .destructive) {
+                                        investmentToDelete = investment
+                                        showingDeleteAlert = true
+                                    } label: {
+                                        Label("刪除紀錄", systemImage: "trash")
+                                    }
+                                }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                }
+                .padding(.bottom, 14)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .cardStyle()
+        .background(AppColor.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 
     // MARK: - 展開後的單筆紀錄
 
     private func detailRow(for investment: Investment) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(formattedDate(investment.buyDate))
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(formattedDate(investment.buyDate))
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.textSecondary)
+                HStack(spacing: 8) {
+                    Text(String(format: "$%.2f", investment.buyPrice))
+                        .font(.warmCaption())
+                    Text("×")
                         .font(.warmCaption2())
                         .foregroundStyle(AppColor.textSecondary)
-                    HStack(spacing: 10) {
-                        Text(String(format: "買入價 $%.2f", investment.buyPrice))
-                            .font(.warmCaption())
-                        Text(String(format: "%.0f 股", investment.quantity))
-                            .font(.warmCaption())
-                        Text(String(format: "成本 $%.0f", investment.totalCost))
-                            .font(.warmCaption())
-                            .foregroundStyle(AppColor.primary)
-                    }
-                }
-                Spacer()
-                Button {
-                    selectedInvestment = investment
-                    showingSellSheet = true
-                } label: {
-                    Text("賣出")
-                        .font(.warmCaption2())
-                        .fontWeight(.medium)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(AppColor.softUp.opacity(0.15))
-                        .foregroundStyle(AppColor.softUp)
-                        .clipShape(Capsule())
+                    Text(String(format: "%.0f 股", investment.quantity))
+                        .font(.warmCaption())
+                    Text(String(format: "$%.0f", investment.totalCost))
+                        .font(.warmCaption())
+                        .foregroundStyle(AppColor.primary)
                 }
             }
-
-            if !investment.buyReason.isEmpty {
-                HStack(alignment: .top, spacing: 4) {
-                    Image(systemName: "text.quote")
-                        .font(.warmCaption2())
-                        .foregroundStyle(AppColor.primary.opacity(0.6))
-                    Text(investment.buyReason)
-                        .font(.warmCaption2())
-                        .foregroundStyle(AppColor.textSecondary)
-                        .lineLimit(2)
-                }
+            Spacer()
+            Button {
+                selectedInvestment = investment
+                showingSellSheet = true
+            } label: {
+                Text("賣出")
+                    .font(.warmCaption2())
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(AppColor.softUp.opacity(0.15))
+                    .foregroundStyle(AppColor.softUp)
+                    .clipShape(Capsule())
             }
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 4)
-        .background(AppColor.background.opacity(0.4))
+        .padding(10)
+        .background(AppColor.background.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
