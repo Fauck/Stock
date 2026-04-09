@@ -21,12 +21,7 @@ struct CalendarView: View {
            sort: \Investment.buyDate, order: .reverse)
     private var closedInvestments: [Investment]
 
-    @State private var selectedDate: Date = Date()
-    @State private var currentMonth: Date = Date()
-    @State private var showingAddSheet = false
-
-    private let calendar = Calendar.current
-    private let weekdaySymbols = ["日", "一", "二", "三", "四", "五", "六"]
+    @State private var vm = CalendarViewModel()
 
     var body: some View {
         NavigationStack {
@@ -51,15 +46,25 @@ struct CalendarView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        showingAddSheet = true
+                        vm.showingAddSheet = true
                     } label: {
                         Image(systemName: "plus.circle.fill")
                             .font(.title3)
                     }
                 }
             }
-            .sheet(isPresented: $showingAddSheet) {
-                AddInvestmentView(selectedDate: selectedDate)
+            .sheet(isPresented: $vm.showingAddSheet) {
+                AddInvestmentView(selectedDate: vm.selectedDate)
+            }
+            .onAppear {
+                vm.investments = investments
+                vm.closedInvestments = closedInvestments
+            }
+            .onChange(of: investments) { _, newValue in
+                vm.investments = newValue
+            }
+            .onChange(of: closedInvestments) { _, newValue in
+                vm.closedInvestments = newValue
             }
         }
     }
@@ -86,7 +91,7 @@ struct CalendarView: View {
     private var monthHeader: some View {
         HStack {
             Button {
-                changeMonth(by: -1)
+                vm.changeMonth(by: -1)
             } label: {
                 Image(systemName: "chevron.left.circle.fill")
                     .font(.title3)
@@ -95,14 +100,14 @@ struct CalendarView: View {
 
             Spacer()
 
-            Text(monthYearString(from: currentMonth))
+            Text(vm.monthYearString(from: vm.currentMonth))
                 .font(.warmTitle())
                 .foregroundStyle(AppColor.textMain)
 
             Spacer()
 
             Button {
-                changeMonth(by: 1)
+                vm.changeMonth(by: 1)
             } label: {
                 Image(systemName: "chevron.right.circle.fill")
                     .font(.title3)
@@ -114,7 +119,7 @@ struct CalendarView: View {
     // MARK: - 星期標頭
     private var weekdayHeader: some View {
         HStack {
-            ForEach(weekdaySymbols, id: \.self) { symbol in
+            ForEach(vm.weekdaySymbols, id: \.self) { symbol in
                 Text(symbol)
                     .font(.warmCaption2())
                     .fontWeight(.bold)
@@ -126,7 +131,7 @@ struct CalendarView: View {
 
     // MARK: - 日期格子
     private var daysGrid: some View {
-        let days = generateDaysInMonth()
+        let days = vm.generateDaysInMonth()
         return LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 8) {
             ForEach(days, id: \.self) { date in
                 if let date = date {
@@ -141,16 +146,16 @@ struct CalendarView: View {
 
     // MARK: - 單日格子（日誌風格）
     private func dayCell(for date: Date) -> some View {
-        let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
-        let isToday = calendar.isDateInToday(date)
-        let hasBuy = !buyRecordsOnDate(date).isEmpty
-        let hasSell = !sellRecordsOnDate(date).isEmpty
+        let isSelected = vm.isDateInSameDay(date, vm.selectedDate)
+        let isToday = vm.isDateToday(date)
+        let hasBuy = !vm.buyRecordsOnDate(date).isEmpty
+        let hasSell = !vm.sellRecordsOnDate(date).isEmpty
 
         return Button {
-            selectedDate = date
+            vm.selectedDate = date
         } label: {
             VStack(spacing: 3) {
-                Text("\(calendar.component(.day, from: date))")
+                Text("\(vm.dayComponent(from: date))")
                     .font(.system(.callout, design: .rounded, weight: isToday ? .bold : .regular))
                     .foregroundStyle(isSelected ? .white : (isToday ? AppColor.primary : AppColor.textMain))
 
@@ -187,20 +192,20 @@ struct CalendarView: View {
 
     // MARK: - 選擇日期的紀錄列表
     private var selectedDateRecords: some View {
-        let buyRecords = buyRecordsOnDate(selectedDate)
-        let sellRecords = sellRecordsOnDate(selectedDate)
+        let buyRecords = vm.buyRecordsOnDate(vm.selectedDate)
+        let sellRecords = vm.sellRecordsOnDate(vm.selectedDate)
         let hasAnyRecord = !buyRecords.isEmpty || !sellRecords.isEmpty
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: "calendar.circle")
                     .foregroundStyle(AppColor.primary)
-                Text(dateString(from: selectedDate))
+                Text(vm.dateString(from: vm.selectedDate))
                     .font(.warmHeadline())
                     .foregroundStyle(AppColor.textMain)
                 Spacer()
                 Button {
-                    showingAddSheet = true
+                    vm.showingAddSheet = true
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "plus")
@@ -316,60 +321,6 @@ struct CalendarView: View {
         .padding(12)
         .background(AppColor.background.opacity(0.6))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    // MARK: - Helper Methods
-
-    /// 該日期的買入紀錄
-    private func buyRecordsOnDate(_ date: Date) -> [Investment] {
-        investments.filter { calendar.isDate($0.buyDate, inSameDayAs: date) }
-    }
-
-    /// 該日期的賣出紀錄（從所有已平倉紀錄中篩選，包含部分賣出拆分紀錄）
-    private func sellRecordsOnDate(_ date: Date) -> [Investment] {
-        closedInvestments.filter { inv in
-            guard let sellDate = inv.sellDate else { return false }
-            return calendar.isDate(sellDate, inSameDayAs: date)
-        }
-    }
-
-    private func changeMonth(by value: Int) {
-        if let newMonth = calendar.date(byAdding: .month, value: value, to: currentMonth) {
-            currentMonth = newMonth
-        }
-    }
-
-    private func generateDaysInMonth() -> [Date?] {
-        guard let range = calendar.range(of: .day, in: .month, for: currentMonth),
-              let firstDayOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: currentMonth))
-        else { return [] }
-
-        let firstWeekday = calendar.component(.weekday, from: firstDayOfMonth)
-        let leadingSpaces = firstWeekday - 1
-
-        var days: [Date?] = Array(repeating: nil, count: leadingSpaces)
-
-        for day in range {
-            if let date = calendar.date(byAdding: .day, value: day - 1, to: firstDayOfMonth) {
-                days.append(date)
-            }
-        }
-
-        return days
-    }
-
-    private func monthYearString(from date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_TW")
-        formatter.dateFormat = "yyyy 年 M 月"
-        return formatter.string(from: date)
-    }
-
-    private func dateString(from date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_TW")
-        formatter.dateFormat = "M 月 d 日（EEEE）"
-        return formatter.string(from: date)
     }
 }
 

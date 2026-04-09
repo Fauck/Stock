@@ -15,28 +15,7 @@ struct PortfolioListView: View {
            sort: \Investment.buyDate, order: .reverse)
     private var investments: [Investment]
 
-    /// 以 ticker 為 key 儲存使用者輸入的目前價格
-    @State private var currentPrices: [String: String] = [:]
-
-    /// 目前展開的群組 ticker
-    @State private var expandedTicker: String?
-
-    // 單筆賣出
-    @State private var selectedInvestment: Investment?
-    @State private var showingSellSheet = false
-
-    // 整批賣出
-    @State private var selectedGroup: PortfolioGroup?
-    @State private var showingGroupSellSheet = false
-
-    // 刪除
-    @State private var investmentToDelete: Investment?
-    @State private var showingDeleteAlert = false
-
-    /// 將查詢結果群組化
-    private var groups: [PortfolioGroup] {
-        PortfolioGroup.buildGroups(from: investments)
-    }
+    @State private var vm = PortfolioListViewModel()
 
     var body: some View {
         NavigationStack {
@@ -55,25 +34,31 @@ struct PortfolioListView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbarBackground(AppColor.primary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .sheet(isPresented: $showingSellSheet) {
-                if let investment = selectedInvestment {
+            .sheet(isPresented: $vm.showingSellSheet) {
+                if let investment = vm.selectedInvestment {
                     SellView(investment: investment)
                 }
             }
-            .sheet(isPresented: $showingGroupSellSheet) {
-                if let group = selectedGroup {
+            .sheet(isPresented: $vm.showingGroupSellSheet) {
+                if let group = vm.selectedGroup {
                     GroupSellView(group: group)
                 }
             }
-            .alert("確認刪除", isPresented: $showingDeleteAlert, presenting: investmentToDelete) { investment in
+            .alert("確認刪除", isPresented: $vm.showingDeleteAlert, presenting: vm.investmentToDelete) { _ in
                 Button("刪除", role: .destructive) {
                     withAnimation {
-                        Investment.deleteInvestment(investment, context: modelContext)
+                        vm.deleteConfirmed(context: modelContext)
                     }
                 }
                 Button("取消", role: .cancel) {}
             } message: { investment in
                 Text("確定要刪除 \(investment.ticker) 的買入紀錄嗎？相關的部分賣出紀錄也會一併刪除。")
+            }
+            .onAppear {
+                vm.investments = investments
+            }
+            .onChange(of: investments) { _, newValue in
+                vm.investments = newValue
             }
         }
     }
@@ -104,7 +89,7 @@ struct PortfolioListView: View {
                     .padding(.horizontal)
 
                 // 各標的卡片
-                ForEach(groups) { group in
+                ForEach(vm.groups) { group in
                     groupCard(for: group)
                         .padding(.horizontal)
                 }
@@ -117,20 +102,7 @@ struct PortfolioListView: View {
     // MARK: - 總覽卡片
 
     private var totalSummaryCard: some View {
-        let totalCost = investments.reduce(0.0) { $0 + $1.totalCost }
-        let totalMarketValue = groups.reduce(0.0) { sum, group in
-            guard let priceStr = currentPrices[group.ticker],
-                  let price = Double(priceStr), price > 0 else { return sum }
-            return sum + price * group.totalQuantity
-        }
-        let hasAnyPrice = groups.contains { group in
-            guard let priceStr = currentPrices[group.ticker],
-                  let price = Double(priceStr) else { return false }
-            return price > 0
-        }
-        let totalPL = totalMarketValue - totalCost
-
-        return VStack(spacing: 12) {
+        VStack(spacing: 12) {
             HStack {
                 Image(systemName: "chart.pie")
                     .foregroundStyle(AppColor.primary)
@@ -147,18 +119,18 @@ struct PortfolioListView: View {
                     .font(.warmCaption())
                     .foregroundStyle(AppColor.textSecondary)
                 Spacer()
-                Text(String(format: "$%.0f", totalCost))
+                Text(String(format: "$%.0f", vm.totalCost))
                     .font(.warmSubheadline())
                     .foregroundStyle(AppColor.textMain)
             }
 
-            if hasAnyPrice {
+            if vm.hasAnyPrice {
                 HStack {
                     Text("目前市值")
                         .font(.warmCaption())
                         .foregroundStyle(AppColor.textSecondary)
                     Spacer()
-                    Text(String(format: "$%.0f", totalMarketValue))
+                    Text(String(format: "$%.0f", vm.totalMarketValue))
                         .font(.warmSubheadline())
                         .foregroundStyle(AppColor.textMain)
                 }
@@ -167,10 +139,10 @@ struct PortfolioListView: View {
                         .font(.warmCaption())
                         .foregroundStyle(AppColor.textSecondary)
                     Spacer()
-                    Text("\(totalPL >= 0 ? "+" : "")$\(totalPL, specifier: "%.0f")")
+                    Text("\(vm.totalPL >= 0 ? "+" : "")$\(vm.totalPL, specifier: "%.0f")")
                         .font(.warmSubheadline())
                         .fontWeight(.bold)
-                        .foregroundStyle(Color.profitLossColor(totalPL))
+                        .foregroundStyle(Color.profitLossColor(vm.totalPL))
                 }
             }
         }
@@ -180,17 +152,14 @@ struct PortfolioListView: View {
     // MARK: - 群組卡片
 
     private func groupCard(for group: PortfolioGroup) -> some View {
-        let isExpanded = expandedTicker == group.ticker
-        let currentPrice: Double? = {
-            guard let str = currentPrices[group.ticker], let p = Double(str), p > 0 else { return nil }
-            return p
-        }()
+        let isExpanded = vm.isExpanded(group.ticker)
+        let currentPrice = vm.currentPrice(for: group.ticker)
 
         return VStack(alignment: .leading, spacing: 0) {
             // ── 摘要列（始終顯示）──
             Button {
                 withAnimation(.easeInOut(duration: 0.3)) {
-                    expandedTicker = isExpanded ? nil : group.ticker
+                    vm.toggleExpanded(group.ticker)
                 }
             } label: {
                 HStack(spacing: 12) {
@@ -270,8 +239,8 @@ struct PortfolioListView: View {
                         TextField(
                             "輸入",
                             text: Binding(
-                                get: { currentPrices[group.ticker] ?? "" },
-                                set: { currentPrices[group.ticker] = $0 }
+                                get: { vm.priceBinding(for: group.ticker) },
+                                set: { vm.setPrice($0, for: group.ticker) }
                             )
                         )
                         .keyboardType(.decimalPad)
@@ -285,8 +254,7 @@ struct PortfolioListView: View {
 
                         // 整批賣出
                         Button {
-                            selectedGroup = group
-                            showingGroupSellSheet = true
+                            vm.selectGroupForSell(group)
                         } label: {
                             Text("整批賣出")
                                 .font(.warmCaption2())
@@ -306,8 +274,7 @@ struct PortfolioListView: View {
                             detailRow(for: investment)
                                 .contextMenu {
                                     Button(role: .destructive) {
-                                        investmentToDelete = investment
-                                        showingDeleteAlert = true
+                                        vm.confirmDelete(investment)
                                     } label: {
                                         Label("刪除紀錄", systemImage: "trash")
                                     }
@@ -330,7 +297,7 @@ struct PortfolioListView: View {
     private func detailRow(for investment: Investment) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
-                Text(formattedDate(investment.buyDate))
+                Text(vm.formattedDate(investment.buyDate))
                     .font(.warmCaption2())
                     .foregroundStyle(AppColor.textSecondary)
                 HStack(spacing: 8) {
@@ -348,8 +315,7 @@ struct PortfolioListView: View {
             }
             Spacer()
             Button {
-                selectedInvestment = investment
-                showingSellSheet = true
+                vm.selectForSell(investment)
             } label: {
                 Text("賣出")
                     .font(.warmCaption2())
@@ -364,14 +330,6 @@ struct PortfolioListView: View {
         .padding(10)
         .background(AppColor.background.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    /// 格式化日期
-    private func formattedDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_TW")
-        formatter.dateFormat = "yyyy/MM/dd"
-        return formatter.string(from: date)
     }
 }
 

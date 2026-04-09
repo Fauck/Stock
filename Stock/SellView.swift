@@ -13,14 +13,12 @@ struct SellView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
-    let investment: Investment
-
-    @State private var sellPriceText: String = ""
-    @State private var sellQuantityText: String = ""
-    @State private var sellReason: String = ""
-    @State private var showingAlert = false
-    @State private var alertMessage = ""
+    @State private var vm: SellViewModel
     @FocusState private var isReasonFocused: Bool
+
+    init(investment: Investment) {
+        _vm = State(initialValue: SellViewModel(investment: investment))
+    }
 
     var body: some View {
         NavigationStack {
@@ -53,7 +51,7 @@ struct SellView: View {
                     }
                 }
             }
-            .navigationTitle("賣出 \(investment.ticker)")
+            .navigationTitle("賣出 \(vm.investment.ticker)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbarBackground(AppColor.primary, for: .navigationBar)
@@ -63,14 +61,18 @@ struct SellView: View {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("確認賣出") { executeSell() }
-                        .fontWeight(.semibold)
+                    Button("確認賣出") {
+                        if vm.executeSell(context: modelContext) {
+                            dismiss()
+                        }
+                    }
+                    .fontWeight(.semibold)
                 }
             }
-            .alert("輸入錯誤", isPresented: $showingAlert) {
+            .alert("輸入錯誤", isPresented: $vm.showingAlert) {
                 Button("確定", role: .cancel) {}
             } message: {
-                Text(alertMessage)
+                Text(vm.alertMessage)
             }
         }
     }
@@ -91,11 +93,11 @@ struct SellView: View {
             AppColor.divider.frame(height: 1)
 
             HStack {
-                WarmInfoBadge(title: "代號", value: investment.ticker)
+                WarmInfoBadge(title: "代號", value: vm.investment.ticker)
                 Spacer()
-                WarmInfoBadge(title: "買入價", value: String(format: "$%.2f", investment.buyPrice))
+                WarmInfoBadge(title: "買入價", value: String(format: "$%.2f", vm.investment.buyPrice))
                 Spacer()
-                WarmInfoBadge(title: "持有量", value: String(format: "%.0f 股", investment.quantity))
+                WarmInfoBadge(title: "持有量", value: String(format: "%.0f 股", vm.investment.quantity))
             }
         }
         .cardStyle()
@@ -125,7 +127,7 @@ struct SellView: View {
                             .font(.warmCaption())
                             .foregroundStyle(AppColor.textSecondary)
                     }
-                    TextField("0.00", text: $sellPriceText)
+                    TextField("0.00", text: $vm.sellPriceText)
                         .keyboardType(.decimalPad)
                         .font(.warmBody())
                         .padding(10)
@@ -142,7 +144,7 @@ struct SellView: View {
                             .font(.warmCaption())
                             .foregroundStyle(AppColor.textSecondary)
                     }
-                    TextField("0", text: $sellQuantityText)
+                    TextField("0", text: $vm.sellQuantityText)
                         .keyboardType(.decimalPad)
                         .font(.warmBody())
                         .padding(10)
@@ -152,7 +154,7 @@ struct SellView: View {
             }
 
             Button {
-                sellQuantityText = "\(Int(investment.quantity))"
+                vm.fillAllQuantity()
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark.circle")
@@ -175,7 +177,7 @@ struct SellView: View {
     private var reasonCard: some View {
         NotebookTextField(
             placeholder: "記錄你的賣出原因...",
-            text: $sellReason,
+            text: $vm.sellReason,
             lineLimit: 4,
             icon: "text.quote",
             iconColor: AppColor.softUp,
@@ -188,14 +190,7 @@ struct SellView: View {
 
     @ViewBuilder
     private var profitPreviewCard: some View {
-        if let sellPrice = Double(sellPriceText),
-           let sellQty = Double(sellQuantityText),
-           sellPrice > 0, sellQty > 0 {
-            let profitLoss = (sellPrice - investment.buyPrice) * sellQty
-            let returnPct = investment.buyPrice > 0
-                ? (sellPrice - investment.buyPrice) / investment.buyPrice * 100
-                : 0
-
+        if let preview = vm.profitPreview {
             VStack(spacing: 10) {
                 HStack {
                     Image(systemName: "chart.line.uptrend.xyaxis")
@@ -213,7 +208,7 @@ struct SellView: View {
                         .font(.warmCaption())
                         .foregroundStyle(AppColor.textSecondary)
                     Spacer()
-                    Text(String(format: "$%.2f", sellPrice * sellQty))
+                    Text(String(format: "$%.2f", preview.sellTotal))
                         .font(.warmSubheadline())
                         .foregroundStyle(AppColor.textMain)
                 }
@@ -222,7 +217,7 @@ struct SellView: View {
                         .font(.warmCaption())
                         .foregroundStyle(AppColor.textSecondary)
                     Spacer()
-                    Text(String(format: "$%.2f", investment.buyPrice * sellQty))
+                    Text(String(format: "$%.2f", preview.costTotal))
                         .font(.warmSubheadline())
                         .foregroundStyle(AppColor.textMain)
                 }
@@ -235,49 +230,17 @@ struct SellView: View {
                         .foregroundStyle(AppColor.textSecondary)
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("\(profitLoss >= 0 ? "+" : "")$\(profitLoss, specifier: "%.2f")")
+                        Text("\(preview.profitLoss >= 0 ? "+" : "")$\(preview.profitLoss, specifier: "%.2f")")
                             .font(.warmHeadline())
-                            .foregroundStyle(Color.profitLossColor(profitLoss))
-                        Text("\(returnPct >= 0 ? "+" : "")\(returnPct, specifier: "%.2f")%")
+                            .foregroundStyle(Color.profitLossColor(preview.profitLoss))
+                        Text("\(preview.returnPct >= 0 ? "+" : "")\(preview.returnPct, specifier: "%.2f")%")
                             .font(.warmCaption())
-                            .foregroundStyle(Color.profitLossColor(returnPct))
+                            .foregroundStyle(Color.profitLossColor(preview.returnPct))
                     }
                 }
             }
             .cardStyle()
         }
-    }
-
-    // MARK: - 執行賣出
-
-    private func executeSell() {
-        guard let sellPrice = Double(sellPriceText), sellPrice > 0 else {
-            alertMessage = "請輸入有效的賣出價格"
-            showingAlert = true
-            return
-        }
-
-        guard let sellQuantity = Double(sellQuantityText), sellQuantity > 0 else {
-            alertMessage = "請輸入有效的賣出數量"
-            showingAlert = true
-            return
-        }
-
-        guard sellQuantity <= investment.quantity else {
-            alertMessage = "賣出數量（\(Int(sellQuantity))）不可大於持有數量（\(Int(investment.quantity))）"
-            showingAlert = true
-            return
-        }
-
-        investment.sell(
-            quantity: sellQuantity,
-            price: sellPrice,
-            date: Date(),
-            reason: sellReason.trimmingCharacters(in: .whitespacesAndNewlines),
-            context: modelContext
-        )
-
-        dismiss()
     }
 }
 

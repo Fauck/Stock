@@ -19,13 +19,7 @@ struct TransactionHistoryView: View {
     @Query(sort: \Investment.buyDate, order: .reverse)
     private var allRecordsForExport: [Investment]
 
-    @State private var selectedFilter: DateFilterOption = .all
-    @State private var customStartDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
-    @State private var customEndDate: Date = Date()
-    @State private var investmentToDelete: Investment?
-    @State private var showingDeleteAlert = false
-    @State private var csvFileURL: URL?
-    @State private var showingShareSheet = false
+    @State private var vm = TransactionHistoryViewModel()
 
     var body: some View {
         NavigationStack {
@@ -36,7 +30,7 @@ struct TransactionHistoryView: View {
                     // 日期篩選器
                     filterBar
 
-                    if filteredInvestments.isEmpty {
+                    if vm.filteredInvestments.isEmpty {
                         Spacer()
                         emptyState
                         Spacer()
@@ -52,30 +46,37 @@ struct TransactionHistoryView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        if let url = Investment.exportCSV(from: allRecordsForExport) {
-                            csvFileURL = url
-                            showingShareSheet = true
-                        }
+                        vm.exportCSV()
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
                 }
             }
-            .sheet(isPresented: $showingShareSheet) {
-                if let url = csvFileURL {
+            .sheet(isPresented: $vm.showingShareSheet) {
+                if let url = vm.csvFileURL {
                     ShareSheetView(items: [url])
                         .presentationDetents([.medium, .large])
                 }
             }
-            .alert("確認刪除", isPresented: $showingDeleteAlert, presenting: investmentToDelete) { investment in
+            .alert("確認刪除", isPresented: $vm.showingDeleteAlert, presenting: vm.investmentToDelete) { _ in
                 Button("刪除", role: .destructive) {
                     withAnimation {
-                        Investment.deleteInvestment(investment, context: modelContext)
+                        vm.deleteConfirmed(context: modelContext)
                     }
                 }
                 Button("取消", role: .cancel) {}
             } message: { investment in
                 Text("確定要刪除 \(investment.ticker) 的買入紀錄嗎？相關的部分賣出紀錄也會一併刪除。")
+            }
+            .onAppear {
+                vm.allInvestments = allInvestments
+                vm.allRecordsForExport = allRecordsForExport
+            }
+            .onChange(of: allInvestments) { _, newValue in
+                vm.allInvestments = newValue
+            }
+            .onChange(of: allRecordsForExport) { _, newValue in
+                vm.allRecordsForExport = newValue
             }
         }
     }
@@ -96,41 +97,6 @@ struct TransactionHistoryView: View {
         }
     }
 
-    // MARK: - 篩選後的紀錄
-
-    private var filteredInvestments: [Investment] {
-        let calendar = Calendar.current
-        let now = Date()
-
-        switch selectedFilter {
-        case .all:
-            return allInvestments
-        case .week:
-            guard let weekAgo = calendar.date(byAdding: .day, value: -7, to: now) else {
-                return allInvestments
-            }
-            return allInvestments.filter { $0.buyDate >= weekAgo }
-        case .month:
-            guard let monthAgo = calendar.date(byAdding: .month, value: -1, to: now) else {
-                return allInvestments
-            }
-            return allInvestments.filter { $0.buyDate >= monthAgo }
-        case .thisMonth:
-            let components = calendar.dateComponents([.year, .month], from: now)
-            guard let firstDayOfMonth = calendar.date(from: components),
-                  let nextMonth = calendar.date(byAdding: .month, value: 1, to: firstDayOfMonth) else {
-                return allInvestments
-            }
-            return allInvestments.filter { $0.buyDate >= firstDayOfMonth && $0.buyDate < nextMonth }
-        case .custom:
-            let startOfDay = calendar.startOfDay(for: customStartDate)
-            guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: customEndDate)) else {
-                return allInvestments
-            }
-            return allInvestments.filter { $0.buyDate >= startOfDay && $0.buyDate < endOfDay }
-        }
-    }
-
     // MARK: - 日期篩選列
 
     private var filterBar: some View {
@@ -140,7 +106,7 @@ struct TransactionHistoryView: View {
                     ForEach(DateFilterOption.allCases) { option in
                         Button {
                             withAnimation(.easeInOut(duration: 0.25)) {
-                                selectedFilter = option
+                                vm.selectedFilter = option
                             }
                         } label: {
                             Text(option.rawValue)
@@ -149,12 +115,12 @@ struct TransactionHistoryView: View {
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 7)
                                 .background(
-                                    selectedFilter == option
+                                    vm.selectedFilter == option
                                         ? AppColor.primary
                                         : AppColor.cardBackground
                                 )
                                 .foregroundStyle(
-                                    selectedFilter == option
+                                    vm.selectedFilter == option
                                         ? .white
                                         : AppColor.textMain
                                 )
@@ -167,13 +133,13 @@ struct TransactionHistoryView: View {
             }
             .padding(.top, 12)
 
-            if selectedFilter == .custom {
+            if vm.selectedFilter == .custom {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("起始日期")
                             .font(.warmCaption2())
                             .foregroundStyle(AppColor.textSecondary)
-                        DatePicker("", selection: $customStartDate, displayedComponents: .date)
+                        DatePicker("", selection: $vm.customStartDate, displayedComponents: .date)
                             .labelsHidden()
                             .tint(AppColor.primary)
                     }
@@ -181,7 +147,7 @@ struct TransactionHistoryView: View {
                         Text("結束日期")
                             .font(.warmCaption2())
                             .foregroundStyle(AppColor.textSecondary)
-                        DatePicker("", selection: $customEndDate, displayedComponents: .date)
+                        DatePicker("", selection: $vm.customEndDate, displayedComponents: .date)
                             .labelsHidden()
                             .tint(AppColor.primary)
                     }
@@ -205,12 +171,11 @@ struct TransactionHistoryView: View {
                     .padding(.horizontal, 16)
 
                 // 逐筆紀錄
-                ForEach(filteredInvestments) { investment in
+                ForEach(vm.filteredInvestments) { investment in
                     transactionCard(for: investment)
                         .contextMenu {
                             Button(role: .destructive) {
-                                investmentToDelete = investment
-                                showingDeleteAlert = true
+                                vm.confirmDelete(investment)
                             } label: {
                                 Label("刪除紀錄", systemImage: "trash")
                             }
@@ -225,17 +190,14 @@ struct TransactionHistoryView: View {
     // MARK: - 總覽卡片
 
     private var summaryCard: some View {
-        let records = filteredInvestments
-        let totalCost = records.reduce(0.0) { $0 + $1.originalTotalCost }
-
-        return HStack {
+        HStack {
             Image(systemName: "book.fill")
                 .foregroundStyle(AppColor.primary)
-            Text("共 \(records.count) 筆買入紀錄")
+            Text("共 \(vm.summaryCount) 筆買入紀錄")
                 .font(.warmSubheadline())
                 .foregroundStyle(AppColor.textMain)
             Spacer()
-            Text(String(format: "總投入 $%.0f", totalCost))
+            Text(String(format: "總投入 $%.0f", vm.summaryTotalCost))
                 .font(.warmSubheadline())
                 .fontWeight(.semibold)
                 .foregroundStyle(AppColor.primary)
@@ -254,7 +216,7 @@ struct TransactionHistoryView: View {
                     .foregroundStyle(AppColor.textMain)
                 Spacer()
                 statusBadge(for: investment)
-                Text(formattedDate(investment.buyDate))
+                Text(vm.formattedDate(investment.buyDate))
                     .font(.warmCaption2())
                     .foregroundStyle(AppColor.textSecondary)
             }
@@ -352,13 +314,6 @@ struct TransactionHistoryView: View {
             }
         }()
         return WarmStatusBadge(text: investment.statusText, color: color)
-    }
-
-    private func formattedDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_TW")
-        formatter.dateFormat = "yyyy/MM/dd（EE）"
-        return formatter.string(from: date)
     }
 }
 

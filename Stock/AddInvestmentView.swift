@@ -13,15 +13,12 @@ struct AddInvestmentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
-    let selectedDate: Date
-
-    @State private var ticker: String = ""
-    @State private var buyPriceText: String = ""
-    @State private var quantityText: String = ""
-    @State private var buyReason: String = ""
-    @State private var showingAlert = false
-    @State private var alertMessage = ""
+    @State private var vm: AddInvestmentViewModel
     @FocusState private var isReasonFocused: Bool
+
+    init(selectedDate: Date) {
+        _vm = State(initialValue: AddInvestmentViewModel(selectedDate: selectedDate))
+    }
 
     var body: some View {
         NavigationStack {
@@ -64,14 +61,18 @@ struct AddInvestmentView: View {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("儲存") { saveInvestment() }
-                        .fontWeight(.semibold)
+                    Button("儲存") {
+                        if vm.save(context: modelContext) {
+                            dismiss()
+                        }
+                    }
+                    .fontWeight(.semibold)
                 }
             }
-            .alert("輸入錯誤", isPresented: $showingAlert) {
+            .alert("輸入錯誤", isPresented: $vm.showingAlert) {
                 Button("確定", role: .cancel) {}
             } message: {
-                Text(alertMessage)
+                Text(vm.alertMessage)
             }
         }
     }
@@ -83,7 +84,7 @@ struct AddInvestmentView: View {
             Image(systemName: "calendar.circle.fill")
                 .font(.title2)
                 .foregroundStyle(AppColor.primary)
-            Text(formattedDate)
+            Text(vm.formattedDate)
                 .font(.warmHeadline())
                 .foregroundStyle(AppColor.textMain)
             Spacer()
@@ -110,7 +111,7 @@ struct AddInvestmentView: View {
                 Text("標的名稱 / 代號")
                     .font(.warmCaption())
                     .foregroundStyle(AppColor.textSecondary)
-                TextField("例如：2330、0050", text: $ticker)
+                TextField("例如：2330、0050", text: $vm.ticker)
                     .textInputAutocapitalization(.characters)
                     .font(.warmBody())
                     .padding(10)
@@ -129,7 +130,7 @@ struct AddInvestmentView: View {
                             .font(.warmCaption())
                             .foregroundStyle(AppColor.textSecondary)
                     }
-                    TextField("0.00", text: $buyPriceText)
+                    TextField("0.00", text: $vm.buyPriceText)
                         .keyboardType(.decimalPad)
                         .font(.warmBody())
                         .padding(10)
@@ -147,7 +148,7 @@ struct AddInvestmentView: View {
                             .font(.warmCaption())
                             .foregroundStyle(AppColor.textSecondary)
                     }
-                    TextField("0", text: $quantityText)
+                    TextField("0", text: $vm.quantityText)
                         .keyboardType(.decimalPad)
                         .font(.warmBody())
                         .padding(10)
@@ -165,7 +166,7 @@ struct AddInvestmentView: View {
         VStack(alignment: .leading, spacing: 8) {
             NotebookTextField(
                 placeholder: "記錄你的買入原因...",
-                text: $buyReason,
+                text: $vm.buyReason,
                 lineLimit: 4,
                 icon: "pencil.line",
                 iconColor: AppColor.primary,
@@ -179,9 +180,7 @@ struct AddInvestmentView: View {
 
     @ViewBuilder
     private var costPreviewCard: some View {
-        if let price = Double(buyPriceText),
-           let qty = Double(quantityText),
-           price > 0, qty > 0 {
+        if let cost = vm.costPreview {
             HStack {
                 Image(systemName: "calculator")
                     .foregroundStyle(AppColor.primary)
@@ -189,56 +188,12 @@ struct AddInvestmentView: View {
                     .font(.warmSubheadline())
                     .foregroundStyle(AppColor.textSecondary)
                 Spacer()
-                Text(String(format: "$%.2f", price * qty))
+                Text(String(format: "$%.2f", cost))
                     .font(.warmTitle())
                     .foregroundStyle(AppColor.primary)
             }
             .cardStyle()
         }
-    }
-
-    // MARK: - 儲存
-
-    private func saveInvestment() {
-        let trimmedTicker = ticker.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedTicker.isEmpty else {
-            alertMessage = "請輸入標的名稱或代號"
-            showingAlert = true
-            return
-        }
-
-        guard let buyPrice = Double(buyPriceText), buyPrice > 0 else {
-            alertMessage = "請輸入有效的買入價格"
-            showingAlert = true
-            return
-        }
-
-        guard let quantity = Double(quantityText), quantity > 0 else {
-            alertMessage = "請輸入有效的買入數量"
-            showingAlert = true
-            return
-        }
-
-        let investment = Investment(
-            ticker: trimmedTicker,
-            buyDate: selectedDate,
-            buyPrice: buyPrice,
-            quantity: quantity,
-            buyReason: buyReason.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
-
-        withAnimation {
-            modelContext.insert(investment)
-        }
-
-        dismiss()
-    }
-
-    private var formattedDate: String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_TW")
-        formatter.dateFormat = "yyyy 年 M 月 d 日（EEEE）"
-        return formatter.string(from: selectedDate)
     }
 }
 

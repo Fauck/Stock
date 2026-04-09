@@ -8,18 +8,6 @@
 import SwiftUI
 import SwiftData
 
-// MARK: - 日期篩選區間列舉
-
-enum DateFilterOption: String, CaseIterable, Identifiable {
-    case all = "全部"
-    case week = "一週內"
-    case month = "一個月內"
-    case thisMonth = "本月"
-    case custom = "自訂區間"
-
-    var id: String { rawValue }
-}
-
 // MARK: - 已賣出紀錄頁面（日誌風格）
 
 struct SoldRecordsView: View {
@@ -29,11 +17,7 @@ struct SoldRecordsView: View {
            sort: \Investment.buyDate, order: .reverse)
     private var allSoldInvestments: [Investment]
 
-    @State private var selectedFilter: DateFilterOption = .all
-    @State private var customStartDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
-    @State private var customEndDate: Date = Date()
-    @State private var investmentToDelete: Investment?
-    @State private var showingDeleteAlert = false
+    @State private var vm = SoldRecordsViewModel()
 
     var body: some View {
         NavigationStack {
@@ -43,7 +27,7 @@ struct SoldRecordsView: View {
                 VStack(spacing: 0) {
                     filterBar
 
-                    if filteredInvestments.isEmpty {
+                    if vm.filteredInvestments.isEmpty {
                         Spacer()
                         emptyState
                         Spacer()
@@ -56,10 +40,10 @@ struct SoldRecordsView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbarBackground(AppColor.primary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .alert("確認刪除", isPresented: $showingDeleteAlert, presenting: investmentToDelete) { investment in
+            .alert("確認刪除", isPresented: $vm.showingDeleteAlert, presenting: vm.investmentToDelete) { _ in
                 Button("刪除", role: .destructive) {
                     withAnimation {
-                        Investment.deleteInvestment(investment, context: modelContext)
+                        vm.deleteConfirmed(context: modelContext)
                     }
                 }
                 Button("取消", role: .cancel) {}
@@ -69,6 +53,12 @@ struct SoldRecordsView: View {
                 } else {
                     Text("確定要刪除 \(investment.ticker) 的已平倉紀錄嗎？")
                 }
+            }
+            .onAppear {
+                vm.allSoldInvestments = allSoldInvestments
+            }
+            .onChange(of: allSoldInvestments) { _, newValue in
+                vm.allSoldInvestments = newValue
             }
         }
     }
@@ -89,53 +79,6 @@ struct SoldRecordsView: View {
         }
     }
 
-    // MARK: - 篩選後的紀錄
-
-    private var filteredInvestments: [Investment] {
-        let calendar = Calendar.current
-        let now = Date()
-
-        switch selectedFilter {
-        case .all:
-            return allSoldInvestments
-        case .week:
-            guard let weekAgo = calendar.date(byAdding: .day, value: -7, to: now) else {
-                return allSoldInvestments
-            }
-            return allSoldInvestments.filter { inv in
-                guard let sellDate = inv.sellDate else { return false }
-                return sellDate >= weekAgo
-            }
-        case .month:
-            guard let monthAgo = calendar.date(byAdding: .month, value: -1, to: now) else {
-                return allSoldInvestments
-            }
-            return allSoldInvestments.filter { inv in
-                guard let sellDate = inv.sellDate else { return false }
-                return sellDate >= monthAgo
-            }
-        case .thisMonth:
-            let components = calendar.dateComponents([.year, .month], from: now)
-            guard let firstDayOfMonth = calendar.date(from: components),
-                  let nextMonth = calendar.date(byAdding: .month, value: 1, to: firstDayOfMonth) else {
-                return allSoldInvestments
-            }
-            return allSoldInvestments.filter { inv in
-                guard let sellDate = inv.sellDate else { return false }
-                return sellDate >= firstDayOfMonth && sellDate < nextMonth
-            }
-        case .custom:
-            let startOfDay = calendar.startOfDay(for: customStartDate)
-            guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: customEndDate)) else {
-                return allSoldInvestments
-            }
-            return allSoldInvestments.filter { inv in
-                guard let sellDate = inv.sellDate else { return false }
-                return sellDate >= startOfDay && sellDate < endOfDay
-            }
-        }
-    }
-
     // MARK: - 日期篩選列
 
     private var filterBar: some View {
@@ -145,7 +88,7 @@ struct SoldRecordsView: View {
                     ForEach(DateFilterOption.allCases) { option in
                         Button {
                             withAnimation(.easeInOut(duration: 0.25)) {
-                                selectedFilter = option
+                                vm.selectedFilter = option
                             }
                         } label: {
                             Text(option.rawValue)
@@ -154,12 +97,12 @@ struct SoldRecordsView: View {
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 7)
                                 .background(
-                                    selectedFilter == option
+                                    vm.selectedFilter == option
                                         ? AppColor.primary
                                         : AppColor.cardBackground
                                 )
                                 .foregroundStyle(
-                                    selectedFilter == option
+                                    vm.selectedFilter == option
                                         ? .white
                                         : AppColor.textMain
                                 )
@@ -172,13 +115,13 @@ struct SoldRecordsView: View {
             }
             .padding(.top, 12)
 
-            if selectedFilter == .custom {
+            if vm.selectedFilter == .custom {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("起始日期")
                             .font(.warmCaption2())
                             .foregroundStyle(AppColor.textSecondary)
-                        DatePicker("", selection: $customStartDate, displayedComponents: .date)
+                        DatePicker("", selection: $vm.customStartDate, displayedComponents: .date)
                             .labelsHidden()
                             .tint(AppColor.primary)
                     }
@@ -186,7 +129,7 @@ struct SoldRecordsView: View {
                         Text("結束日期")
                             .font(.warmCaption2())
                             .foregroundStyle(AppColor.textSecondary)
-                        DatePicker("", selection: $customEndDate, displayedComponents: .date)
+                        DatePicker("", selection: $vm.customEndDate, displayedComponents: .date)
                             .labelsHidden()
                             .tint(AppColor.primary)
                     }
@@ -210,12 +153,11 @@ struct SoldRecordsView: View {
                     .padding(.horizontal, 16)
 
                 // 個別紀錄
-                ForEach(filteredInvestments) { investment in
+                ForEach(vm.filteredInvestments) { investment in
                     soldRecordCard(for: investment)
                         .contextMenu {
                             Button(role: .destructive) {
-                                investmentToDelete = investment
-                                showingDeleteAlert = true
+                                vm.confirmDelete(investment)
                             } label: {
                                 Label("刪除紀錄", systemImage: "trash")
                             }
@@ -230,32 +172,21 @@ struct SoldRecordsView: View {
     // MARK: - 損益總覽卡片
 
     private var profitLossSummaryCard: some View {
-        let records = filteredInvestments
-        let totalPL = records.reduce(0.0) { $0 + $1.realizedProfitLoss }
-        let totalSellAmount = records.reduce(0.0) { sum, inv in
-            guard let sp = inv.sellPrice, let sq = inv.sellQuantity else { return sum }
-            return sum + sp * sq
-        }
-        let totalCostAmount = records.reduce(0.0) { sum, inv in
-            guard let sq = inv.sellQuantity else { return sum }
-            return sum + inv.buyPrice * sq
-        }
-
-        return VStack(spacing: 12) {
+        VStack(spacing: 12) {
             // 總損益（最醒目）
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("總已實現損益")
                         .font(.warmCaption())
                         .foregroundStyle(AppColor.textSecondary)
-                    Text("\(totalPL >= 0 ? "+" : "")$\(totalPL, specifier: "%.0f")")
+                    Text("\(vm.totalPL >= 0 ? "+" : "")$\(vm.totalPL, specifier: "%.0f")")
                         .font(.warmLargeNumber())
-                        .foregroundStyle(Color.profitLossColor(totalPL))
+                        .foregroundStyle(Color.profitLossColor(vm.totalPL))
                 }
                 Spacer()
-                Image(systemName: totalPL >= 0 ? "arrow.up.right.circle.fill" : "arrow.down.right.circle.fill")
+                Image(systemName: vm.totalPL >= 0 ? "arrow.up.right.circle.fill" : "arrow.down.right.circle.fill")
                     .font(.system(size: 36))
-                    .foregroundStyle(Color.profitLossColor(totalPL).opacity(0.3))
+                    .foregroundStyle(Color.profitLossColor(vm.totalPL).opacity(0.3))
             }
 
             AppColor.divider.frame(height: 1)
@@ -265,7 +196,7 @@ struct SoldRecordsView: View {
                     .font(.warmCaption())
                     .foregroundStyle(AppColor.textSecondary)
                 Spacer()
-                Text(String(format: "$%.0f", totalSellAmount))
+                Text(String(format: "$%.0f", vm.totalSellAmount))
                     .font(.warmSubheadline())
                     .foregroundStyle(AppColor.textMain)
             }
@@ -274,7 +205,7 @@ struct SoldRecordsView: View {
                     .font(.warmCaption())
                     .foregroundStyle(AppColor.textSecondary)
                 Spacer()
-                Text(String(format: "$%.0f", totalCostAmount))
+                Text(String(format: "$%.0f", vm.totalCostAmount))
                     .font(.warmSubheadline())
                     .foregroundStyle(AppColor.textMain)
             }
@@ -283,7 +214,7 @@ struct SoldRecordsView: View {
                     .font(.warmCaption())
                     .foregroundStyle(AppColor.textSecondary)
                 Spacer()
-                Text("\(records.count) 筆")
+                Text("\(vm.recordCount) 筆")
                     .font(.warmSubheadline())
                     .foregroundStyle(AppColor.textMain)
             }
@@ -302,7 +233,7 @@ struct SoldRecordsView: View {
                     .foregroundStyle(AppColor.textMain)
                 Spacer()
                 if let sellDate = investment.sellDate {
-                    Text(formattedDate(sellDate))
+                    Text(vm.formattedDate(sellDate))
                         .font(.warmCaption2())
                         .foregroundStyle(AppColor.textSecondary)
                 }
@@ -340,13 +271,6 @@ struct SoldRecordsView: View {
             }
         }
         .cardStyle()
-    }
-
-    private func formattedDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_TW")
-        formatter.dateFormat = "yyyy/MM/dd"
-        return formatter.string(from: date)
     }
 }
 
