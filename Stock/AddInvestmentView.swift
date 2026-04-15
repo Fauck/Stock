@@ -34,6 +34,9 @@ struct AddInvestmentView: View {
                             // MARK: - 標的 & 交易細節
                             tradeInfoCard
 
+                            // MARK: - 大盤狀態
+                            marketConditionCard
+
                             // MARK: - 買入理由
                             reasonCard
                                 .id("reasonCard")
@@ -158,6 +161,13 @@ struct AddInvestmentView: View {
             }
         }
         .cardStyle()
+    }
+
+    // MARK: - 大盤狀態卡片
+
+    private var marketConditionCard: some View {
+        MarketConditionPicker(selection: $vm.buyMarketCondition)
+            .cardStyle()
     }
 
     // MARK: - 買入理由卡片

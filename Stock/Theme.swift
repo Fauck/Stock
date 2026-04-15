@@ -232,6 +232,63 @@ struct WarmStatusBadge: View {
     }
 }
 
+// MARK: - 大盤狀態選擇器
+
+/// 水平膠囊按鈕列，選擇大盤狀態
+struct MarketConditionPicker: View {
+    @Binding var selection: MarketCondition?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "chart.bar.fill")
+                    .foregroundStyle(AppColor.primary)
+                Text("大盤狀態")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            HStack(spacing: 6) {
+                ForEach(MarketCondition.allCases) { condition in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            selection = selection == condition ? nil : condition
+                        }
+                    } label: {
+                        Text(condition.rawValue)
+                            .font(.warmCaption2())
+                            .fontWeight(.medium)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                selection == condition
+                                    ? marketConditionColor(condition)
+                                    : AppColor.background
+                            )
+                            .foregroundStyle(
+                                selection == condition
+                                    ? .white
+                                    : AppColor.textMain
+                            )
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func marketConditionColor(_ condition: MarketCondition) -> Color {
+        switch condition {
+        case .bigUp:    return AppColor.softUp
+        case .smallUp:  return AppColor.softUp.opacity(0.7)
+        case .flat:     return AppColor.textSecondary
+        case .smallDown: return AppColor.softDown.opacity(0.7)
+        case .bigDown:  return AppColor.softDown
+        }
+    }
+}
+
 // MARK: - 系統分享表單
 
 /// 包裝 UIActivityViewController 供 SwiftUI 使用

@@ -11,6 +11,7 @@ final class GroupSellViewModel {
     var sellPriceText: String = ""
     var sellQuantityText: String = ""
     var sellReason: String = ""
+    var sellMarketCondition: MarketCondition?
     var showingAlert: Bool = false
     var alertMessage: String = ""
 
@@ -65,6 +66,7 @@ final class GroupSellViewModel {
             price: sellPrice,
             date: Date(),
             reason: sellReason.trimmingCharacters(in: .whitespacesAndNewlines),
+            marketCondition: sellMarketCondition,
             context: context
         )
         return true

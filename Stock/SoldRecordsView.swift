@@ -226,11 +226,23 @@ struct SoldRecordsView: View {
 
     private func soldRecordCard(for investment: Investment) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            // 標的名稱 + 賣出日期
+            // 標的名稱 + 大盤狀態 + 賣出日期
             HStack {
                 Text(investment.ticker)
                     .font(.warmHeadline())
                     .foregroundStyle(AppColor.textMain)
+                if let mc = investment.buyMarketConditionEnum {
+                    Text("買:\(mc.rawValue)")
+                        .font(.warmCaption2())
+                        .fontWeight(.medium)
+                        .foregroundStyle(mc.color)
+                }
+                if let mc = investment.sellMarketConditionEnum {
+                    Text("賣:\(mc.rawValue)")
+                        .font(.warmCaption2())
+                        .fontWeight(.medium)
+                        .foregroundStyle(mc.color)
+                }
                 Spacer()
                 if let sellDate = investment.sellDate {
                     Text(vm.formattedDate(sellDate))

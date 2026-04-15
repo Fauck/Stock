@@ -34,6 +34,9 @@ struct GroupSellView: View {
                             // MARK: - 賣出輸入
                             sellInputCard
 
+                            // MARK: - 大盤狀態
+                            marketConditionCard
+
                             // MARK: - 賣出理由
                             reasonCard
                                 .id("reasonCard")
@@ -183,6 +186,13 @@ struct GroupSellView: View {
             }
         }
         .cardStyle()
+    }
+
+    // MARK: - 大盤狀態卡片
+
+    private var marketConditionCard: some View {
+        MarketConditionPicker(selection: $vm.sellMarketCondition)
+            .cardStyle()
     }
 
     // MARK: - 賣出理由

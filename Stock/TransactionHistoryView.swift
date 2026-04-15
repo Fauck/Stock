@@ -209,11 +209,17 @@ struct TransactionHistoryView: View {
 
     private func transactionCard(for investment: Investment) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            // 第一列：標的 + 狀態 + 日期
+            // 第一列：標的 + 買入大盤 + 狀態 + 日期
             HStack {
                 Text(investment.ticker)
                     .font(.warmHeadline())
                     .foregroundStyle(AppColor.textMain)
+                if let mc = investment.buyMarketConditionEnum {
+                    Text(mc.rawValue)
+                        .font(.warmCaption2())
+                        .fontWeight(.medium)
+                        .foregroundStyle(mc.color)
+                }
                 Spacer()
                 statusBadge(for: investment)
                 Text(vm.formattedDate(investment.buyDate))
@@ -236,6 +242,12 @@ struct TransactionHistoryView: View {
                 HStack {
                     if let sp = investment.sellPrice {
                         WarmInfoBadge(title: "賣出價", value: String(format: "$%.2f", sp))
+                    }
+                    if let mc = investment.sellMarketConditionEnum {
+                        Text(mc.rawValue)
+                            .font(.warmCaption2())
+                            .fontWeight(.medium)
+                            .foregroundStyle(mc.color)
                     }
                     Spacer()
                     if let sq = investment.sellQuantity {

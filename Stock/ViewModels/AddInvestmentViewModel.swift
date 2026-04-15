@@ -12,6 +12,7 @@ final class AddInvestmentViewModel {
     var buyPriceText: String = ""
     var quantityText: String = ""
     var buyReason: String = ""
+    var buyMarketCondition: MarketCondition?
     var showingAlert: Bool = false
     var alertMessage: String = ""
 
@@ -57,7 +58,8 @@ final class AddInvestmentViewModel {
             buyDate: selectedDate,
             buyPrice: buyPrice,
             quantity: quantity,
-            buyReason: buyReason.trimmingCharacters(in: .whitespacesAndNewlines)
+            buyReason: buyReason.trimmingCharacters(in: .whitespacesAndNewlines),
+            buyMarketCondition: buyMarketCondition
         )
         context.insert(investment)
         return true

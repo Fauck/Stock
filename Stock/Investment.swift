@@ -38,6 +38,10 @@ final class Investment {
     var sellReason: String
     /// 是否為部分賣出時系統拆分產生的紀錄（非使用者手動建立）
     var isPartialSellRecord: Bool
+    /// 買入時大盤狀態（V2 新增，舊資料預設 nil）
+    var buyMarketCondition: String?
+    /// 賣出時大盤狀態（V2 新增，舊資料預設 nil）
+    var sellMarketCondition: String?
 
     init(
         id: UUID = UUID(),
@@ -51,7 +55,9 @@ final class Investment {
         sellQuantity: Double? = nil,
         buyReason: String = "",
         sellReason: String = "",
-        isPartialSellRecord: Bool = false
+        isPartialSellRecord: Bool = false,
+        buyMarketCondition: MarketCondition? = nil,
+        sellMarketCondition: MarketCondition? = nil
     ) {
         self.id = id
         self.ticker = ticker
@@ -66,6 +72,22 @@ final class Investment {
         self.buyReason = buyReason
         self.sellReason = sellReason
         self.isPartialSellRecord = isPartialSellRecord
+        self.buyMarketCondition = buyMarketCondition?.rawValue
+        self.sellMarketCondition = sellMarketCondition?.rawValue
+    }
+
+    // MARK: - 大盤狀態便利存取
+
+    /// 買入時大盤狀態（enum）
+    var buyMarketConditionEnum: MarketCondition? {
+        get { buyMarketCondition.flatMap { MarketCondition(rawValue: $0) } }
+        set { buyMarketCondition = newValue?.rawValue }
+    }
+
+    /// 賣出時大盤狀態（enum）
+    var sellMarketConditionEnum: MarketCondition? {
+        get { sellMarketCondition.flatMap { MarketCondition(rawValue: $0) } }
+        set { sellMarketCondition = newValue?.rawValue }
     }
 
     // MARK: - 商業邏輯
@@ -165,7 +187,7 @@ final class Investment {
     // MARK: - CSV 匯出
 
     /// CSV 表頭
-    static let csvHeader = "標的,買入日期,買入價格,原始數量,目前數量,狀態,賣出日期,賣出價格,賣出數量,已實現損益,買入理由,賣出理由"
+    static let csvHeader = "標的,買入日期,買入價格,原始數量,目前數量,狀態,賣出日期,賣出價格,賣出數量,已實現損益,買入理由,賣出理由,買入大盤,賣出大盤"
 
     /// 將單筆紀錄轉為 CSV 行
     var csvRow: String {
@@ -199,7 +221,9 @@ final class Investment {
             sellQtyStr,
             plStr,
             escape(buyReason),
-            escape(sellReason)
+            escape(sellReason),
+            buyMarketConditionEnum?.rawValue ?? "",
+            sellMarketConditionEnum?.rawValue ?? ""
         ].joined(separator: ",")
     }
 
@@ -234,6 +258,7 @@ final class Investment {
         price: Double,
         date: Date,
         reason: String,
+        marketCondition: MarketCondition? = nil,
         context: ModelContext
     ) -> Bool {
         guard sellQty > 0, sellQty <= quantity, price > 0 else {
@@ -246,6 +271,7 @@ final class Investment {
             self.sellDate = date
             self.sellQuantity = quantity
             self.sellReason = reason
+            self.sellMarketConditionEnum = marketCondition
             self.quantity = 0
             self.isClosed = true
         } else {
@@ -261,7 +287,9 @@ final class Investment {
                 sellQuantity: sellQty,
                 buyReason: buyReason,
                 sellReason: reason,
-                isPartialSellRecord: true
+                isPartialSellRecord: true,
+                buyMarketCondition: buyMarketConditionEnum,
+                sellMarketCondition: marketCondition
             )
             // 拆分紀錄的 originalQuantity 設為賣出數量（因為它只代表這一部分）
             closedRecord.originalQuantity = sellQty
@@ -318,6 +346,7 @@ struct PortfolioGroup: Identifiable {
         price: Double,
         date: Date,
         reason: String,
+        marketCondition: MarketCondition? = nil,
         context: ModelContext
     ) -> Bool {
         guard sellQty > 0, sellQty <= totalQuantity, price > 0 else {
@@ -330,7 +359,7 @@ struct PortfolioGroup: Identifiable {
         for investment in sorted {
             guard remaining > 0 else { break }
             let qty = min(remaining, investment.quantity)
-            investment.sell(quantity: qty, price: price, date: date, reason: reason, context: context)
+            investment.sell(quantity: qty, price: price, date: date, reason: reason, marketCondition: marketCondition, context: context)
             remaining -= qty
         }
 

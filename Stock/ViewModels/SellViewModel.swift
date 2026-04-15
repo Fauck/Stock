@@ -19,6 +19,7 @@ final class SellViewModel {
     var sellPriceText: String = ""
     var sellQuantityText: String = ""
     var sellReason: String = ""
+    var sellMarketCondition: MarketCondition?
     var showingAlert: Bool = false
     var alertMessage: String = ""
 
@@ -72,6 +73,7 @@ final class SellViewModel {
             price: sellPrice,
             date: Date(),
             reason: sellReason.trimmingCharacters(in: .whitespacesAndNewlines),
+            marketCondition: sellMarketCondition,
             context: context
         )
         return true
