@@ -262,6 +262,8 @@ struct SoldRecordsView: View {
                 if let sq = investment.sellQuantity {
                     WarmInfoBadge(title: "數量", value: String(format: "%.0f 股", sq))
                 }
+                Spacer()
+                WarmInfoBadge(title: "持有", value: "\(investment.holdingDays) 天")
             }
 
             // 損益顯示

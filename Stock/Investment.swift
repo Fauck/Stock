@@ -90,6 +90,14 @@ final class Investment {
         set { sellMarketCondition = newValue?.rawValue }
     }
 
+    // MARK: - 持有天數
+
+    /// 持有天數：從買入日到賣出日（已平倉）或今天（持有中）
+    var holdingDays: Int {
+        let end = sellDate ?? Date()
+        return max(Calendar.current.dateComponents([.day], from: buyDate, to: end).day ?? 0, 0)
+    }
+
     // MARK: - 商業邏輯
 
     /// 計算未實現損益
@@ -326,6 +334,12 @@ struct PortfolioGroup: Identifiable {
     /// 總投入金額
     var totalInvested: Double {
         investments.reduce(0.0) { $0 + $1.totalCost }
+    }
+
+    /// 最早買入日至今的持有天數
+    var holdingDays: Int {
+        guard let earliest = investments.map(\.buyDate).min() else { return 0 }
+        return max(Calendar.current.dateComponents([.day], from: earliest, to: Date()).day ?? 0, 0)
     }
 
     /// 計算群組未實現損益

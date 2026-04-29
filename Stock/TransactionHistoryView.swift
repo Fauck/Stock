@@ -101,6 +101,39 @@ struct TransactionHistoryView: View {
 
     private var filterBar: some View {
         VStack(spacing: 10) {
+            // 狀態篩選列
+            HStack(spacing: 8) {
+                ForEach(StatusFilterOption.allCases) { option in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            vm.selectedStatusFilter = option
+                        }
+                    } label: {
+                        Text(option.rawValue)
+                            .font(.warmCaption())
+                            .fontWeight(.medium)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(
+                                vm.selectedStatusFilter == option
+                                    ? AppColor.secondary
+                                    : AppColor.cardBackground
+                            )
+                            .foregroundStyle(
+                                vm.selectedStatusFilter == option
+                                    ? .white
+                                    : AppColor.textMain
+                            )
+                            .clipShape(Capsule())
+                            .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+
+            // 日期篩選列
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(DateFilterOption.allCases) { option in
@@ -131,7 +164,6 @@ struct TransactionHistoryView: View {
                 }
                 .padding(.horizontal, 16)
             }
-            .padding(.top, 12)
 
             if vm.selectedFilter == .custom {
                 HStack(spacing: 16) {

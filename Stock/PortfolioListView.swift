@@ -225,6 +225,8 @@ struct PortfolioListView: View {
                         WarmInfoBadge(title: "總投入", value: String(format: "$%.0f", group.totalInvested))
                         Spacer()
                         WarmInfoBadge(title: "筆數", value: "\(group.investments.count) 筆")
+                        Spacer()
+                        WarmInfoBadge(title: "持有", value: "\(group.holdingDays) 天")
                     }
                     .padding(.horizontal, 14)
 
@@ -297,9 +299,14 @@ struct PortfolioListView: View {
     private func detailRow(for investment: Investment) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
-                Text(vm.formattedDate(investment.buyDate))
-                    .font(.warmCaption2())
-                    .foregroundStyle(AppColor.textSecondary)
+                HStack(spacing: 6) {
+                    Text(vm.formattedDate(investment.buyDate))
+                        .font(.warmCaption2())
+                        .foregroundStyle(AppColor.textSecondary)
+                    Text("\(investment.holdingDays) 天")
+                        .font(.warmCaption2())
+                        .foregroundStyle(AppColor.primary.opacity(0.7))
+                }
                 HStack(spacing: 8) {
                     Text(String(format: "$%.2f", investment.buyPrice))
                         .font(.warmCaption())
