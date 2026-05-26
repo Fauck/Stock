@@ -23,6 +23,14 @@ struct ToolboxView: View {
                             iconColor: AppColor.primary,
                             destination: MortgageCalculatorView()
                         )
+
+                        toolCard(
+                            title: "資料備份",
+                            subtitle: "匯出或匯入投資紀錄備份檔案",
+                            icon: "externaldrive.fill",
+                            iconColor: AppColor.secondary,
+                            destination: DataTransferView()
+                        )
                     }
                     .padding(16)
                 }

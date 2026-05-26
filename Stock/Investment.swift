@@ -259,6 +259,77 @@ final class Investment {
         ].joined(separator: ",")
     }
 
+    /// 轉換為可序列化的傳輸結構
+    var toCodable: CodableInvestment {
+        CodableInvestment(
+            id: id,
+            ticker: ticker,
+            buyDate: buyDate,
+            buyPrice: buyPrice,
+            originalQuantity: originalQuantity,
+            quantity: quantity,
+            isClosed: isClosed,
+            sellPrice: sellPrice,
+            sellDate: sellDate,
+            sellQuantity: sellQuantity,
+            buyReason: buyReason,
+            sellReason: sellReason,
+            isPartialSellRecord: isPartialSellRecord,
+            buyMarketCondition: buyMarketCondition,
+            sellMarketCondition: sellMarketCondition
+        )
+    }
+
+    /// 從傳輸結構建立 Investment
+    static func fromCodable(_ c: CodableInvestment) -> Investment {
+        let inv = Investment(
+            id: c.id,
+            ticker: c.ticker,
+            buyDate: c.buyDate,
+            buyPrice: c.buyPrice,
+            quantity: c.quantity,
+            isClosed: c.isClosed,
+            sellPrice: c.sellPrice,
+            sellDate: c.sellDate,
+            sellQuantity: c.sellQuantity,
+            buyReason: c.buyReason,
+            sellReason: c.sellReason,
+            isPartialSellRecord: c.isPartialSellRecord,
+            buyMarketCondition: c.buyMarketCondition.flatMap { MarketCondition(rawValue: $0) },
+            sellMarketCondition: c.sellMarketCondition.flatMap { MarketCondition(rawValue: $0) }
+        )
+        // init 會將 originalQuantity 設為 quantity，需手動覆寫
+        inv.originalQuantity = c.originalQuantity
+        return inv
+    }
+
+    // MARK: - JSON 備份匯出
+
+    /// 將所有紀錄匯出為 JSON 備份檔案 URL
+    static func exportJSON(from investments: [Investment]) -> URL? {
+        let codables = investments.map(\.toCodable)
+        let backup = InvestmentBackup(investments: codables)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        guard let data = try? encoder.encode(backup) else { return nil }
+
+        let tempDir = FileManager.default.temporaryDirectory
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd_HHmmss"
+        let fileName = "投資紀錄備份_\(df.string(from: Date())).stockbackup"
+        let fileURL = tempDir.appendingPathComponent(fileName)
+
+        do {
+            try data.write(to: fileURL)
+            return fileURL
+        } catch {
+            return nil
+        }
+    }
+
     /// 將所有紀錄匯出為 CSV 檔案 URL
     static func exportCSV(from investments: [Investment]) -> URL? {
         let csv = csvHeader + "\n" + investments.map(\.csvRow).joined(separator: "\n")
@@ -415,5 +486,41 @@ struct PortfolioGroup: Identifiable {
             )
         }
         .sorted { $0.ticker < $1.ticker }
+    }
+}
+
+// MARK: - JSON 備份傳輸結構
+
+/// 可序列化的 Investment 傳輸結構（避免 @Model + Codable 衝突）
+struct CodableInvestment: Codable, Sendable {
+    let id: UUID
+    let ticker: String
+    let buyDate: Date
+    let buyPrice: Double
+    let originalQuantity: Double
+    let quantity: Double
+    let isClosed: Bool
+    let sellPrice: Double?
+    let sellDate: Date?
+    let sellQuantity: Double?
+    let buyReason: String
+    let sellReason: String
+    let isPartialSellRecord: Bool
+    let buyMarketCondition: String?
+    let sellMarketCondition: String?
+}
+
+/// 備份信封：包含版本資訊，供未來相容
+struct InvestmentBackup: Codable, Sendable {
+    let version: Int
+    let exportDate: Date
+    let recordCount: Int
+    let investments: [CodableInvestment]
+
+    init(investments: [CodableInvestment]) {
+        self.version = 1
+        self.exportDate = Date()
+        self.recordCount = investments.count
+        self.investments = investments
     }
 }
