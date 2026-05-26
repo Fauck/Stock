@@ -216,6 +216,12 @@ struct MortgageCalculatorView: View {
 
             AppColor.divider.frame(height: 1)
 
+            // 頭期款
+            if let dp = vm.downPayment {
+                resultRow(title: "頭期款", value: formatCurrency(dp), isHighlighted: false)
+                AppColor.divider.frame(height: 0.5)
+            }
+
             if vm.hasGracePeriod {
                 // 有寬限期：並排顯示
                 twoColumnResult
@@ -258,12 +264,12 @@ struct MortgageCalculatorView: View {
                 Text("")
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text("無寬限期")
-                    .font(.warmCaption())
+                    .font(.warmSubheadline())
                     .fontWeight(.semibold)
                     .foregroundStyle(AppColor.primary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 Text("有寬限期")
-                    .font(.warmCaption())
+                    .font(.warmSubheadline())
                     .fontWeight(.semibold)
                     .foregroundStyle(AppColor.softDown)
                     .frame(maxWidth: .infinity, alignment: .trailing)
@@ -306,13 +312,13 @@ struct MortgageCalculatorView: View {
                 let diff = graceTotalInt - totalInt
                 HStack {
                     Text("利息差額")
-                        .font(.warmCaption())
+                        .font(.warmSubheadline())
                         .foregroundStyle(AppColor.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Text("")
                         .frame(maxWidth: .infinity, alignment: .trailing)
                     Text("+\(formatCurrency(diff))")
-                        .font(.warmCaption())
+                        .font(.warmSubheadline())
                         .fontWeight(.medium)
                         .foregroundStyle(AppColor.softUp)
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -324,11 +330,11 @@ struct MortgageCalculatorView: View {
     private func resultRow(title: String, value: String, isHighlighted: Bool) -> some View {
         HStack {
             Text(title)
-                .font(.warmSubheadline())
+                .font(.warmHeadline())
                 .foregroundStyle(AppColor.textSecondary)
             Spacer()
             Text(value)
-                .font(isHighlighted ? .warmLargeNumber() : .warmHeadline())
+                .font(.warmLargeNumber())
                 .fontWeight(isHighlighted ? .bold : .semibold)
                 .foregroundStyle(isHighlighted ? AppColor.primary : AppColor.textMain)
         }
@@ -337,16 +343,16 @@ struct MortgageCalculatorView: View {
     private func comparisonRow(title: String, normalValue: String, graceValue: String) -> some View {
         HStack {
             Text(title)
-                .font(.warmCaption())
+                .font(.warmSubheadline())
                 .foregroundStyle(AppColor.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(normalValue)
-                .font(.warmCaption())
+                .font(.warmSubheadline())
                 .fontWeight(.medium)
                 .foregroundStyle(AppColor.textMain)
                 .frame(maxWidth: .infinity, alignment: .trailing)
             Text(graceValue)
-                .font(.warmCaption())
+                .font(.warmSubheadline())
                 .fontWeight(.medium)
                 .foregroundStyle(AppColor.softDown)
                 .frame(maxWidth: .infinity, alignment: .trailing)

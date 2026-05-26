@@ -95,6 +95,12 @@ final class MortgageCalculatorViewModel {
         return v
     }
 
+    /// 頭期款金額：有填成數時 = 總價 - 貸款金額
+    var downPayment: Double? {
+        guard let base = loanAmountInYuan, let ltv = loanToValue else { return nil }
+        return base * (1 - ltv / 10.0)
+    }
+
     /// 實際貸款金額：有填成數則 金額 × 成數 / 10，否則直接用貸款金額
     private var actualLoanAmount: Double? {
         guard let base = loanAmountInYuan else { return nil }
