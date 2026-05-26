@@ -10,7 +10,7 @@ SwiftUI + SwiftData 股票投資追蹤 App，採用溫暖手帳日誌風格 UI�
 ```
 Stock/
 ├── StockApp.swift              # App 入口，ModelContainer
-├── ContentView.swift           # TabView（4 個 Tab）
+├── ContentView.swift           # TabView（5 個 Tab）
 ├── Investment.swift            # @Model 資料模型 + PortfolioGroup
 ├── Theme.swift                 # AppColor、字型、共用 UI 元件
 ├── Utilities/
@@ -24,11 +24,14 @@ Stock/
 │   ├── SoldRecordsViewModel.swift
 │   ├── AddInvestmentViewModel.swift
 │   ├── SellViewModel.swift
-│   └── GroupSellViewModel.swift
+│   ├── GroupSellViewModel.swift
+│   └── MortgageCalculatorViewModel.swift
 ├── CalendarView.swift          # Tab 0：行事曆
 ├── PortfolioListView.swift     # Tab 1：持有庫存
 ├── TransactionHistoryView.swift# Tab 2：交易紀錄
 ├── SoldRecordsView.swift       # Tab 3：已實現損益
+├── ToolboxView.swift           # Tab 4：工具箱（工具列表）
+├── MortgageCalculatorView.swift # 工具：房貸試算
 ├── AddInvestmentView.swift     # Sheet：新增買入
 ├── SellView.swift              # Sheet：單筆賣出
 └── GroupSellView.swift         # Sheet：整批賣出

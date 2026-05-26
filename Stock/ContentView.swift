@@ -37,6 +37,12 @@ struct ContentView: View {
                     Label("已實現損益", systemImage: "checkmark.seal.fill")
                 }
                 .tag(3)
+
+            ToolboxView()
+                .tabItem {
+                    Label("工具箱", systemImage: "wrench.and.screwdriver.fill")
+                }
+                .tag(4)
         }
         .tint(AppColor.primary)
     }

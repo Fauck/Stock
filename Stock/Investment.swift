@@ -90,12 +90,36 @@ final class Investment {
         set { sellMarketCondition = newValue?.rawValue }
     }
 
-    // MARK: - 持有天數
+    // MARK: - 持有交易日天數
 
-    /// 持有天數：從買入日到賣出日（已平倉）或今天（持有中）
+    /// 持有交易日天數：從買入日到賣出日（已平倉）或今天（持有中），僅計算週一至週五
     var holdingDays: Int {
         let end = sellDate ?? Date()
-        return max(Calendar.current.dateComponents([.day], from: buyDate, to: end).day ?? 0, 0)
+        return Investment.tradingDaysBetween(from: buyDate, to: end)
+    }
+
+    /// 計算兩個日期之間的交易日數（排除週六、週日），不含起始日
+    static func tradingDaysBetween(from start: Date, to end: Date) -> Int {
+        let calendar = Calendar.current
+        let startDay = calendar.startOfDay(for: start)
+        let endDay = calendar.startOfDay(for: end)
+
+        guard startDay < endDay else { return 0 }
+
+        // 從起始日的隔天開始計算
+        guard var current = calendar.date(byAdding: .day, value: 1, to: startDay) else { return 0 }
+
+        var count = 0
+        while current <= endDay {
+            let weekday = calendar.component(.weekday, from: current)
+            // weekday: 1 = Sunday, 7 = Saturday
+            if weekday != 1 && weekday != 7 {
+                count += 1
+            }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: current) else { break }
+            current = next
+        }
+        return count
     }
 
     // MARK: - 商業邏輯
@@ -336,10 +360,10 @@ struct PortfolioGroup: Identifiable {
         investments.reduce(0.0) { $0 + $1.totalCost }
     }
 
-    /// 最早買入日至今的持有天數
+    /// 最早買入日至今的持有交易日天數
     var holdingDays: Int {
         guard let earliest = investments.map(\.buyDate).min() else { return 0 }
-        return max(Calendar.current.dateComponents([.day], from: earliest, to: Date()).day ?? 0, 0)
+        return Investment.tradingDaysBetween(from: earliest, to: Date())
     }
 
     /// 計算群組未實現損益
