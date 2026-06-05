@@ -54,7 +54,7 @@ struct SellView: View {
                     }
                 }
             }
-            .navigationTitle("賣出 \(vm.investment.ticker)")
+            .navigationTitle("賣出 \(StockMapping.displayName(for: vm.investment.ticker))")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbarBackground(AppColor.primary, for: .navigationBar)
@@ -96,7 +96,7 @@ struct SellView: View {
             AppColor.divider.frame(height: 1)
 
             HStack {
-                WarmInfoBadge(title: "代號", value: vm.investment.ticker)
+                WarmInfoBadge(title: "股名", value: StockMapping.displayName(for: vm.investment.ticker))
                 Spacer()
                 WarmInfoBadge(title: "買入價", value: String(format: "$%.2f", vm.investment.buyPrice))
                 Spacer()

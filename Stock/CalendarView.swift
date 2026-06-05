@@ -274,7 +274,7 @@ struct CalendarView: View {
     private func buyRow(_ investment: Investment) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text(investment.ticker)
+                Text(StockMapping.displayName(for: investment.ticker))
                     .font(.warmHeadline())
                     .foregroundStyle(AppColor.textMain)
                 Text(String(format: "買入價：$%.2f", investment.buyPrice))
@@ -295,7 +295,7 @@ struct CalendarView: View {
     private func sellRow(_ investment: Investment) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text(investment.ticker)
+                Text(StockMapping.displayName(for: investment.ticker))
                     .font(.warmHeadline())
                     .foregroundStyle(AppColor.textMain)
                 if let sp = investment.sellPrice {

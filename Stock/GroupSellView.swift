@@ -57,7 +57,7 @@ struct GroupSellView: View {
                     }
                 }
             }
-            .navigationTitle("賣出 \(vm.group.ticker)")
+            .navigationTitle("賣出 \(StockMapping.displayName(for: vm.group.ticker))")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbarBackground(AppColor.primary, for: .navigationBar)
@@ -94,7 +94,7 @@ struct GroupSellView: View {
                     .font(.warmHeadline())
                     .foregroundStyle(AppColor.textMain)
                 Spacer()
-                Text(vm.group.ticker)
+                Text(StockMapping.displayName(for: vm.group.ticker))
                     .font(.warmTitle())
                     .foregroundStyle(AppColor.primary)
             }

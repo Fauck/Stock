@@ -52,13 +52,18 @@ struct PortfolioListView: View {
                 }
                 Button("取消", role: .cancel) {}
             } message: { investment in
-                Text("確定要刪除 \(investment.ticker) 的買入紀錄嗎？相關的部分賣出紀錄也會一併刪除。")
+                Text("確定要刪除 \(StockMapping.displayName(for: investment.ticker)) 的買入紀錄嗎？相關的部分賣出紀錄也會一併刪除。")
             }
             .onAppear {
                 vm.investments = investments
+                vm.fetchAllPrices()
             }
             .onChange(of: investments) { _, newValue in
                 vm.investments = newValue
+                // 資料更新時重新拉取即時價（含首次 @Query 載入完成時）
+                if !newValue.isEmpty && !vm.hasAnyPrice {
+                    vm.fetchAllPrices()
+                }
             }
         }
     }
@@ -110,6 +115,20 @@ struct PortfolioListView: View {
                     .font(.warmHeadline())
                     .foregroundStyle(AppColor.textMain)
                 Spacer()
+                // 重新整理即時價
+                Button {
+                    vm.fetchAllPrices()
+                } label: {
+                    if vm.isFetchingPrices {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.warmCaption())
+                            .foregroundStyle(AppColor.primary)
+                    }
+                }
+                .disabled(vm.isFetchingPrices)
             }
 
             AppColor.divider.frame(height: 1)
@@ -139,10 +158,16 @@ struct PortfolioListView: View {
                         .font(.warmCaption())
                         .foregroundStyle(AppColor.textSecondary)
                     Spacer()
-                    Text("\(vm.totalPL >= 0 ? "+" : "")$\(vm.totalPL, specifier: "%.0f")")
-                        .font(.warmSubheadline())
-                        .fontWeight(.bold)
-                        .foregroundStyle(Color.profitLossColor(vm.totalPL))
+                    HStack(spacing: 6) {
+                        Text("\(vm.totalPL >= 0 ? "+" : "")$\(vm.totalPL, specifier: "%.0f")")
+                            .font(.warmSubheadline())
+                            .fontWeight(.bold)
+                            .foregroundStyle(Color.profitLossColor(vm.totalPL))
+                        Text("(\(vm.totalReturnPct >= 0 ? "+" : "")\(vm.totalReturnPct, specifier: "%.1f")%)")
+                            .font(.warmCaption())
+                            .fontWeight(.medium)
+                            .foregroundStyle(Color.profitLossColor(vm.totalPL))
+                    }
                 }
             }
         }
@@ -163,11 +188,16 @@ struct PortfolioListView: View {
                 }
             } label: {
                 HStack(spacing: 12) {
-                    // 左：標的代號
-                    Text(group.ticker)
-                        .font(.warmHeadline())
-                        .foregroundStyle(AppColor.primary)
-                        .frame(minWidth: 50, alignment: .leading)
+                    // 左：中文名稱（主）+ 代號（副）
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(vm.displayName(for: group.ticker))
+                            .font(.warmHeadline())
+                            .foregroundStyle(AppColor.primary)
+                        Text(group.ticker)
+                            .font(.warmCaption2())
+                            .foregroundStyle(AppColor.textSecondary)
+                    }
+                    .frame(minWidth: 60, alignment: .leading)
 
                     // 中：股數 + 均價
                     VStack(alignment: .leading, spacing: 2) {
@@ -181,24 +211,29 @@ struct PortfolioListView: View {
 
                     Spacer()
 
-                    // 右：損益或總投入
+                    // 右：即時價 + 損益
                     if let price = currentPrice {
                         let pl = group.unrealizedProfitLoss(currentPrice: price)
                         let pct = group.returnPercentage(currentPrice: price)
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f")")
+                            Text(String(format: "$%.2f", price))
                                 .font(.warmCaption())
                                 .fontWeight(.semibold)
-                                .foregroundStyle(Color.profitLossColor(pl))
-                            Text("\(pct >= 0 ? "+" : "")\(pct, specifier: "%.1f")%")
+                                .foregroundStyle(AppColor.textMain)
+                            Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f") (\(pct >= 0 ? "+" : "")\(pct, specifier: "%.1f")%)")
                                 .font(.warmCaption2())
-                                .foregroundStyle(Color.profitLossColor(pct))
+                                .foregroundStyle(Color.profitLossColor(pl))
                         }
                     } else {
-                        Text(String(format: "$%.0f", group.totalInvested))
-                            .font(.warmCaption())
-                            .fontWeight(.medium)
-                            .foregroundStyle(AppColor.textMain)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(String(format: "$%.0f", group.totalInvested))
+                                .font(.warmCaption())
+                                .fontWeight(.medium)
+                                .foregroundStyle(AppColor.textMain)
+                            Text("無即時價")
+                                .font(.warmCaption2())
+                                .foregroundStyle(AppColor.textSecondary.opacity(0.6))
+                        }
                     }
 
                     // 展開指示箭頭
@@ -218,11 +253,71 @@ struct PortfolioListView: View {
                     AppColor.divider.frame(height: 1)
                         .padding(.horizontal, 14)
 
+                    // 即時價格 & 損益區塊
+                    if let price = currentPrice {
+                        let pl = group.unrealizedProfitLoss(currentPrice: price)
+                        let pct = group.returnPercentage(currentPrice: price)
+                        let marketValue = price * group.totalQuantity
+
+                        VStack(spacing: 8) {
+                            // 即時價格列
+                            HStack {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "bolt.fill")
+                                        .font(.warmCaption2())
+                                        .foregroundStyle(AppColor.secondary)
+                                    Text("即時價")
+                                        .font(.warmCaption())
+                                        .foregroundStyle(AppColor.textSecondary)
+                                }
+                                Spacer()
+                                Text(String(format: "$%.2f", price))
+                                    .font(.warmHeadline())
+                                    .foregroundStyle(AppColor.textMain)
+                            }
+
+                            // 市值 & 損益列
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("市值")
+                                        .font(.warmCaption2())
+                                        .foregroundStyle(AppColor.textSecondary)
+                                    Text(String(format: "$%.0f", marketValue))
+                                        .font(.warmCaption())
+                                        .fontWeight(.medium)
+                                        .foregroundStyle(AppColor.textMain)
+                                }
+                                Spacer()
+                                VStack(alignment: .center, spacing: 2) {
+                                    Text("成本")
+                                        .font(.warmCaption2())
+                                        .foregroundStyle(AppColor.textSecondary)
+                                    Text(String(format: "$%.0f", group.totalInvested))
+                                        .font(.warmCaption())
+                                        .fontWeight(.medium)
+                                        .foregroundStyle(AppColor.textMain)
+                                }
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text("未實現損益")
+                                        .font(.warmCaption2())
+                                        .foregroundStyle(AppColor.textSecondary)
+                                    Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f") (\(pct >= 0 ? "+" : "")\(pct, specifier: "%.1f")%)")
+                                        .font(.warmCaption())
+                                        .fontWeight(.bold)
+                                        .foregroundStyle(Color.profitLossColor(pl))
+                                }
+                            }
+                        }
+                        .padding(10)
+                        .background(Color.profitLossColor(pl).opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .padding(.horizontal, 14)
+                    }
+
                     // 資訊徽章列
                     HStack {
                         WarmInfoBadge(title: "均價", value: String(format: "$%.2f", group.weightedAverageCost))
-                        Spacer()
-                        WarmInfoBadge(title: "總投入", value: String(format: "$%.0f", group.totalInvested))
                         Spacer()
                         WarmInfoBadge(title: "筆數", value: "\(group.investments.count) 筆")
                         Spacer()
@@ -230,7 +325,7 @@ struct PortfolioListView: View {
                     }
                     .padding(.horizontal, 14)
 
-                    // 現價輸入
+                    // 現價手動修正 & 整批賣出
                     HStack(spacing: 10) {
                         Image(systemName: "pencil.and.list.clipboard")
                             .font(.warmCaption())
@@ -239,7 +334,7 @@ struct PortfolioListView: View {
                             .font(.warmCaption())
                             .foregroundStyle(AppColor.textSecondary)
                         TextField(
-                            "輸入",
+                            "手動輸入",
                             text: Binding(
                                 get: { vm.priceBinding(for: group.ticker) },
                                 set: { vm.setPrice($0, for: group.ticker) }
@@ -273,7 +368,7 @@ struct PortfolioListView: View {
                     // 買入明細
                     VStack(spacing: 6) {
                         ForEach(group.investments) { investment in
-                            detailRow(for: investment)
+                            detailRow(for: investment, currentPrice: currentPrice)
                                 .contextMenu {
                                     Button(role: .destructive) {
                                         vm.confirmDelete(investment)
@@ -296,42 +391,58 @@ struct PortfolioListView: View {
 
     // MARK: - 展開後的單筆紀錄
 
-    private func detailRow(for investment: Investment) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(vm.formattedDate(investment.buyDate))
-                        .font(.warmCaption2())
-                        .foregroundStyle(AppColor.textSecondary)
-                    Text("\(investment.holdingDays) 天")
-                        .font(.warmCaption2())
-                        .foregroundStyle(AppColor.primary.opacity(0.7))
+    private func detailRow(for investment: Investment, currentPrice: Double?) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(vm.formattedDate(investment.buyDate))
+                            .font(.warmCaption2())
+                            .foregroundStyle(AppColor.textSecondary)
+                        Text("\(investment.holdingDays) 天")
+                            .font(.warmCaption2())
+                            .foregroundStyle(AppColor.primary.opacity(0.7))
+                    }
+                    HStack(spacing: 8) {
+                        Text(String(format: "$%.2f", investment.buyPrice))
+                            .font(.warmCaption())
+                        Text("×")
+                            .font(.warmCaption2())
+                            .foregroundStyle(AppColor.textSecondary)
+                        Text(String(format: "%.0f 股", investment.quantity))
+                            .font(.warmCaption())
+                        Text(String(format: "$%.0f", investment.totalCost))
+                            .font(.warmCaption())
+                            .foregroundStyle(AppColor.primary)
+                    }
                 }
-                HStack(spacing: 8) {
-                    Text(String(format: "$%.2f", investment.buyPrice))
-                        .font(.warmCaption())
-                    Text("×")
-                        .font(.warmCaption2())
-                        .foregroundStyle(AppColor.textSecondary)
-                    Text(String(format: "%.0f 股", investment.quantity))
-                        .font(.warmCaption())
-                    Text(String(format: "$%.0f", investment.totalCost))
-                        .font(.warmCaption())
-                        .foregroundStyle(AppColor.primary)
+                Spacer()
+                // 右側：單筆損益 + 賣出按鈕
+                VStack(alignment: .trailing, spacing: 4) {
+                    if let price = currentPrice {
+                        let pl = investment.unrealizedProfitLoss(currentPrice: price)
+                        let pct = investment.returnPercentage(currentPrice: price)
+                        Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f")")
+                            .font(.warmCaption2())
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Color.profitLossColor(pl))
+                        Text("\(pct >= 0 ? "+" : "")\(pct, specifier: "%.1f")%")
+                            .font(.warmCaption2())
+                            .foregroundStyle(Color.profitLossColor(pct))
+                    }
+                    Button {
+                        vm.selectForSell(investment)
+                    } label: {
+                        Text("賣出")
+                            .font(.warmCaption2())
+                            .fontWeight(.medium)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(AppColor.softUp.opacity(0.15))
+                            .foregroundStyle(AppColor.softUp)
+                            .clipShape(Capsule())
+                    }
                 }
-            }
-            Spacer()
-            Button {
-                vm.selectForSell(investment)
-            } label: {
-                Text("賣出")
-                    .font(.warmCaption2())
-                    .fontWeight(.medium)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(AppColor.softUp.opacity(0.15))
-                    .foregroundStyle(AppColor.softUp)
-                    .clipShape(Capsule())
             }
         }
         .padding(10)

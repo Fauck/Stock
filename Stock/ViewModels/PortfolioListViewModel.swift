@@ -11,6 +11,12 @@ final class PortfolioListViewModel {
     var currentPrices: [String: String] = [:]
     var expandedTicker: String?
 
+    /// API 查到的中文名稱快取 [symbol: name]
+    var stockNames: [String: String] = [:]
+
+    /// 是否正在批次載入即時價格
+    var isFetchingPrices: Bool = false
+
     // 單筆賣出
     var selectedInvestment: Investment?
     var showingSellSheet: Bool = false
@@ -22,6 +28,8 @@ final class PortfolioListViewModel {
     // 刪除
     var investmentToDelete: Investment?
     var showingDeleteAlert: Bool = false
+
+    private var fetchTask: Task<Void, Never>?
 
     // MARK: - Computed
 
@@ -55,6 +63,12 @@ final class PortfolioListViewModel {
         totalMarketValue - totalCost
     }
 
+    /// 總報酬率（百分比）
+    var totalReturnPct: Double {
+        guard totalCost > 0 else { return 0 }
+        return totalPL / totalCost * 100
+    }
+
     // MARK: - Group Helpers
 
     func isExpanded(_ ticker: String) -> Bool {
@@ -76,6 +90,53 @@ final class PortfolioListViewModel {
 
     func setPrice(_ value: String, for ticker: String) {
         currentPrices[ticker] = value
+    }
+
+    /// 取得股票的顯示名稱：優先 API 名稱 → 本地字典 → 原始代號
+    /// 自動去除 * 等標記
+    func displayName(for ticker: String) -> String {
+        if let name = stockNames[ticker] {
+            return name.replacingOccurrences(of: "*", with: "")
+        }
+        if let name = StockMapping.cleanName(for: ticker) { return name }
+        return ticker
+    }
+
+    // MARK: - 即時價格載入
+
+    /// 批次載入所有持有標的的即時報價
+    func fetchAllPrices() {
+        let tickers = groups.map(\.ticker)
+        guard !tickers.isEmpty else { return }
+
+        fetchTask?.cancel()
+        fetchTask = Task { @MainActor in
+            isFetchingPrices = true
+
+            // 將 ticker 解析為 API 可查詢的代號
+            // 例如：使用者之前可能存了 "台積電" 而非 "2330"
+            var tickerToSymbol: [String: String] = [:]
+            for ticker in tickers {
+                let resolved = StockMapping.resolve(ticker)
+                tickerToSymbol[ticker] = resolved.symbol
+            }
+
+            let apiSymbols = Array(Set(tickerToSymbol.values))
+            let results = await StockService.shared.fetchQuotes(symbols: apiSymbols)
+
+            guard !Task.isCancelled else { return }
+
+            // 將結果映射回原始 ticker
+            for (ticker, apiSymbol) in tickerToSymbol {
+                if let result = results[apiSymbol] {
+                    currentPrices[ticker] = String(format: "%.2f", result.lastPrice)
+                    let cleanName = result.name.replacingOccurrences(of: "*", with: "")
+                    stockNames[ticker] = cleanName
+                    StockMapping.cache(symbol: apiSymbol, name: result.name)
+                }
+            }
+            isFetchingPrices = false
+        }
     }
 
     // MARK: - Actions

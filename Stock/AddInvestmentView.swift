@@ -114,12 +114,41 @@ struct AddInvestmentView: View {
                 Text("標的名稱 / 代號")
                     .font(.warmCaption())
                     .foregroundStyle(AppColor.textSecondary)
-                TextField("例如：2330、0050", text: $vm.ticker)
+                TextField("例如：2330、台積電", text: $vm.ticker)
                     .textInputAutocapitalization(.characters)
                     .font(.warmBody())
                     .padding(10)
                     .background(AppColor.background)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .onChange(of: vm.ticker) { _, _ in
+                        vm.onTickerChanged()
+                    }
+
+                // 解析結果顯示
+                if let displayText = vm.tickerDisplayText {
+                    HStack(spacing: 4) {
+                        if vm.isFetchingPrice {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                        } else if vm.fetchError != nil {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.warmCaption2())
+                                .foregroundStyle(AppColor.softDown)
+                        } else {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.warmCaption2())
+                                .foregroundStyle(AppColor.secondary)
+                        }
+                        Text(displayText)
+                            .font(.warmCaption())
+                            .foregroundStyle(
+                                vm.fetchError != nil
+                                    ? AppColor.softDown
+                                    : AppColor.secondary
+                            )
+                    }
+                    .padding(.leading, 4)
+                }
             }
 
             HStack(spacing: 12) {
@@ -132,6 +161,21 @@ struct AddInvestmentView: View {
                         Text("買入價格")
                             .font(.warmCaption())
                             .foregroundStyle(AppColor.textSecondary)
+                        // 即時價帶入按鈕
+                        if let price = vm.fetchedPrice {
+                            Button {
+                                vm.applyFetchedPrice()
+                            } label: {
+                                Text("即時 $\(String(format: "%.2f", price))")
+                                    .font(.warmCaption2())
+                                    .fontWeight(.medium)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(AppColor.secondary.opacity(0.15))
+                                    .foregroundStyle(AppColor.secondary)
+                                    .clipShape(Capsule())
+                            }
+                        }
                     }
                     TextField("0.00", text: $vm.buyPriceText)
                         .keyboardType(.decimalPad)

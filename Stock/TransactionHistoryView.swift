@@ -66,7 +66,7 @@ struct TransactionHistoryView: View {
                 }
                 Button("取消", role: .cancel) {}
             } message: { investment in
-                Text("確定要刪除 \(investment.ticker) 的買入紀錄嗎？相關的部分賣出紀錄也會一併刪除。")
+                Text("確定要刪除 \(StockMapping.displayName(for: investment.ticker)) 的買入紀錄嗎？相關的部分賣出紀錄也會一併刪除。")
             }
             .onAppear {
                 vm.allInvestments = allInvestments
@@ -243,7 +243,7 @@ struct TransactionHistoryView: View {
         VStack(alignment: .leading, spacing: 10) {
             // 第一列：標的 + 買入大盤 + 狀態 + 日期
             HStack {
-                Text(investment.ticker)
+                Text(StockMapping.displayName(for: investment.ticker))
                     .font(.warmHeadline())
                     .foregroundStyle(AppColor.textMain)
                 if let mc = investment.buyMarketConditionEnum {

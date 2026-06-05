@@ -476,12 +476,15 @@ struct PortfolioGroup: Identifiable {
     }
 
     /// 從投資紀錄陣列建立群組
+    /// 使用標準化代號分組，讓同股票不同 ticker 格式（如 "2330" 和 "台積電"）合併
     static func buildGroups(from investments: [Investment]) -> [PortfolioGroup] {
-        let grouped = Dictionary(grouping: investments, by: { $0.ticker })
-        return grouped.map { ticker, items in
+        let grouped = Dictionary(grouping: investments, by: {
+            StockMapping.normalizedSymbol(for: $0.ticker)
+        })
+        return grouped.map { symbol, items in
             PortfolioGroup(
-                id: ticker,
-                ticker: ticker,
+                id: symbol,
+                ticker: symbol,
                 investments: items.sorted { $0.buyDate > $1.buyDate }
             )
         }

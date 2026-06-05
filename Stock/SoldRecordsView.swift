@@ -49,9 +49,9 @@ struct SoldRecordsView: View {
                 Button("取消", role: .cancel) {}
             } message: { investment in
                 if investment.isPartialSellRecord {
-                    Text("確定要刪除 \(investment.ticker) 的賣出紀錄嗎？賣出數量將歸還至原始買入紀錄。")
+                    Text("確定要刪除 \(StockMapping.displayName(for: investment.ticker)) 的賣出紀錄嗎？賣出數量將歸還至原始買入紀錄。")
                 } else {
-                    Text("確定要刪除 \(investment.ticker) 的已平倉紀錄嗎？")
+                    Text("確定要刪除 \(StockMapping.displayName(for: investment.ticker)) 的已平倉紀錄嗎？")
                 }
             }
             .onAppear {
@@ -228,7 +228,7 @@ struct SoldRecordsView: View {
         VStack(alignment: .leading, spacing: 10) {
             // 標的名稱 + 大盤狀態 + 賣出日期
             HStack {
-                Text(investment.ticker)
+                Text(StockMapping.displayName(for: investment.ticker))
                     .font(.warmHeadline())
                     .foregroundStyle(AppColor.textMain)
                 if let mc = investment.buyMarketConditionEnum {
