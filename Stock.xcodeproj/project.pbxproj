@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		1FB994692F7CAF3900710C8A /* Stock.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Stock.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1FB994692F7CAF3900710C8A /* 股票筆記.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "股票筆記.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -40,7 +40,7 @@
 		1FB9946A2F7CAF3900710C8A /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				1FB994692F7CAF3900710C8A /* Stock.app */,
+				1FB994692F7CAF3900710C8A /* 股票筆記.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,9 +48,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		1FB994682F7CAF3900710C8A /* Stock */ = {
+		1FB994682F7CAF3900710C8A /* 股票筆記 */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 1FB994762F7CAF3A00710C8A /* Build configuration list for PBXNativeTarget "Stock" */;
+			buildConfigurationList = 1FB994762F7CAF3A00710C8A /* Build configuration list for PBXNativeTarget "股票筆記" */;
 			buildPhases = (
 				1FB994652F7CAF3900710C8A /* Sources */,
 				1FB994662F7CAF3900710C8A /* Frameworks */,
@@ -63,11 +63,11 @@
 			fileSystemSynchronizedGroups = (
 				1FB9946B2F7CAF3900710C8A /* Stock */,
 			);
-			name = Stock;
+			name = "股票筆記";
 			packageProductDependencies = (
 			);
 			productName = Stock;
-			productReference = 1FB994692F7CAF3900710C8A /* Stock.app */;
+			productReference = 1FB994692F7CAF3900710C8A /* 股票筆記.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -99,7 +99,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				1FB994682F7CAF3900710C8A /* Stock */,
+				1FB994682F7CAF3900710C8A /* 股票筆記 */,
 			);
 		};
 /* End PBXProject section */
@@ -252,7 +252,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20260526;
+				CURRENT_PROJECT_VERSION = 20260605;
 				DEVELOPMENT_TEAM = VTAMFD3B55;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -266,7 +266,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.yen.Stock;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -285,7 +285,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20260526;
+				CURRENT_PROJECT_VERSION = 20260605;
 				DEVELOPMENT_TEAM = VTAMFD3B55;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -299,7 +299,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.yen.Stock;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -324,7 +324,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		1FB994762F7CAF3A00710C8A /* Build configuration list for PBXNativeTarget "Stock" */ = {
+		1FB994762F7CAF3A00710C8A /* Build configuration list for PBXNativeTarget "股票筆記" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				1FB994772F7CAF3A00710C8A /* Debug */,
