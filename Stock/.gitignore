@@ -60,4 +60,4 @@ you should judge for yourself, the pros and cons are mentioned at:
 
 忽略敏感的密鑰設定檔，防止 API Key 外洩上傳至 Git
 
-Stock/Secrets.swift
+Secrets.swift
