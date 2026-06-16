@@ -9,6 +9,8 @@ final class PortfolioListViewModel {
 
     // MARK: - State
     var currentPrices: [String: String] = [:]
+    /// 昨日收盤價 [ticker: previousClose]
+    var previousClosePrices: [String: Double] = [:]
     var expandedTicker: String?
 
     /// API 查到的中文名稱快取 [symbol: name]
@@ -67,6 +69,31 @@ final class PortfolioListViewModel {
     var totalReturnPct: Double {
         guard totalCost > 0 else { return 0 }
         return totalPL / totalCost * 100
+    }
+
+    /// 本日總損益增減 = 今日未實現損益 - 昨日未實現損益
+    /// 昨日未實現損益 = Σ (previousClose - avgCost) × qty
+    /// 今日未實現損益 = Σ (currentPrice - avgCost) × qty
+    /// 差值 = Σ (currentPrice - previousClose) × qty
+    var totalDailyPLChange: Double? {
+        var total: Double = 0
+        var hasAny = false
+        for group in groups {
+            guard let priceStr = currentPrices[group.ticker],
+                  let price = Double(priceStr), price > 0,
+                  let prevClose = previousClosePrices[group.ticker], prevClose > 0 else { continue }
+            hasAny = true
+            total += (price - prevClose) * group.totalQuantity
+        }
+        return hasAny ? total : nil
+    }
+
+    /// 單一標的本日損益增減
+    func dailyPLChange(for ticker: String, quantity: Double) -> Double? {
+        guard let priceStr = currentPrices[ticker],
+              let price = Double(priceStr), price > 0,
+              let prevClose = previousClosePrices[ticker], prevClose > 0 else { return nil }
+        return (price - prevClose) * quantity
     }
 
     // MARK: - Group Helpers
@@ -130,6 +157,9 @@ final class PortfolioListViewModel {
             for (ticker, apiSymbol) in tickerToSymbol {
                 if let result = results[apiSymbol] {
                     currentPrices[ticker] = String(format: "%.2f", result.lastPrice)
+                    if let prevClose = result.previousClose, prevClose > 0 {
+                        previousClosePrices[ticker] = prevClose
+                    }
                     let cleanName = result.name.replacingOccurrences(of: "*", with: "")
                     stockNames[ticker] = cleanName
                     StockMapping.cache(symbol: apiSymbol, name: result.name)

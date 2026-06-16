@@ -169,6 +169,26 @@ struct PortfolioListView: View {
                             .foregroundStyle(Color.profitLossColor(vm.totalPL))
                     }
                 }
+
+                // 本日總損益增減
+                if let dailyChange = vm.totalDailyPLChange {
+                    AppColor.divider.frame(height: 1)
+                    HStack {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                                .font(.warmCaption2())
+                                .foregroundStyle(AppColor.secondary)
+                            Text("本日損益增減")
+                                .font(.warmCaption())
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+                        Spacer()
+                        Text("\(dailyChange >= 0 ? "+" : "")$\(dailyChange, specifier: "%.0f")")
+                            .font(.warmSubheadline())
+                            .fontWeight(.bold)
+                            .foregroundStyle(Color.profitLossColor(dailyChange))
+                    }
+                }
             }
         }
         .cardStyle()
@@ -306,6 +326,26 @@ struct PortfolioListView: View {
                                         .font(.warmCaption())
                                         .fontWeight(.bold)
                                         .foregroundStyle(Color.profitLossColor(pl))
+                                }
+                            }
+
+                            // 本日損益增減（單一標的）
+                            if let dailyChange = vm.dailyPLChange(for: group.ticker, quantity: group.totalQuantity) {
+                                AppColor.divider.frame(height: 1)
+                                HStack {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "chart.line.uptrend.xyaxis")
+                                            .font(.warmCaption2())
+                                            .foregroundStyle(AppColor.secondary)
+                                        Text("本日增減")
+                                            .font(.warmCaption2())
+                                            .foregroundStyle(AppColor.textSecondary)
+                                    }
+                                    Spacer()
+                                    Text("\(dailyChange >= 0 ? "+" : "")$\(dailyChange, specifier: "%.0f")")
+                                        .font(.warmCaption())
+                                        .fontWeight(.bold)
+                                        .foregroundStyle(Color.profitLossColor(dailyChange))
                                 }
                             }
                         }
