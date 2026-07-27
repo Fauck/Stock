@@ -11,6 +11,10 @@ final class PortfolioListViewModel {
     var currentPrices: [String: String] = [:]
     /// 昨日收盤價 [ticker: previousClose]
     var previousClosePrices: [String: Double] = [:]
+    /// 當日漲跌點數 [ticker: change]
+    var dailyChangePoints: [String: Double] = [:]
+    /// 當日漲跌百分比 [ticker: changePercent]
+    var dailyChangePercents: [String: Double] = [:]
     var expandedTicker: String?
 
     /// API 查到的中文名稱快取 [symbol: name]
@@ -159,6 +163,12 @@ final class PortfolioListViewModel {
                     currentPrices[ticker] = String(format: "%.2f", result.lastPrice)
                     if let prevClose = result.previousClose, prevClose > 0 {
                         previousClosePrices[ticker] = prevClose
+                    }
+                    if let change = result.change {
+                        dailyChangePoints[ticker] = change
+                    }
+                    if let changePct = result.changePercent {
+                        dailyChangePercents[ticker] = changePct
                     }
                     let cleanName = result.name.replacingOccurrences(of: "*", with: "")
                     stockNames[ticker] = cleanName

@@ -7,7 +7,7 @@ actor StockService {
     private let baseURL = "https://api.fugle.tw/marketdata/v1.0/stock"
     private let apiKey = Secrets.fugleAPIKey
 
-    // MARK: - Response Models
+    // MARK: - Response Models   
 
     struct QuoteResponse: Decodable {
         let symbol: String?

@@ -231,15 +231,23 @@ struct PortfolioListView: View {
 
                     Spacer()
 
-                    // 右：即時價 + 損益
+                    // 右：即時價 + 漲跌 + 損益
                     if let price = currentPrice {
                         let pl = group.unrealizedProfitLoss(currentPrice: price)
                         let pct = group.returnPercentage(currentPrice: price)
+                        let change = vm.dailyChangePoints[group.ticker]
+                        let changePct = vm.dailyChangePercents[group.ticker]
                         VStack(alignment: .trailing, spacing: 2) {
                             Text(String(format: "$%.2f", price))
                                 .font(.warmCaption())
                                 .fontWeight(.semibold)
                                 .foregroundStyle(AppColor.textMain)
+                            // 當日漲跌
+                            if let change, let changePct {
+                                Text("\(change >= 0 ? "▲" : "▼")\(abs(change), specifier: "%.2f") (\(changePct >= 0 ? "+" : "")\(changePct, specifier: "%.2f")%)")
+                                    .font(.warmCaption2())
+                                    .foregroundStyle(Color.profitLossColor(change))
+                            }
                             Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f") (\(pct >= 0 ? "+" : "")\(pct, specifier: "%.1f")%)")
                                 .font(.warmCaption2())
                                 .foregroundStyle(Color.profitLossColor(pl))
@@ -291,9 +299,19 @@ struct PortfolioListView: View {
                                         .foregroundStyle(AppColor.textSecondary)
                                 }
                                 Spacer()
-                                Text(String(format: "$%.2f", price))
-                                    .font(.warmHeadline())
-                                    .foregroundStyle(AppColor.textMain)
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text(String(format: "$%.2f", price))
+                                        .font(.warmHeadline())
+                                        .foregroundStyle(AppColor.textMain)
+                                    // 當日漲跌點數 & %
+                                    if let change = vm.dailyChangePoints[group.ticker],
+                                       let changePct = vm.dailyChangePercents[group.ticker] {
+                                        Text("\(change >= 0 ? "▲" : "▼")\(abs(change), specifier: "%.2f") (\(changePct >= 0 ? "+" : "")\(changePct, specifier: "%.2f")%)")
+                                            .font(.warmCaption())
+                                            .fontWeight(.medium)
+                                            .foregroundStyle(Color.profitLossColor(change))
+                                    }
+                                }
                             }
 
                             // 市值 & 損益列
