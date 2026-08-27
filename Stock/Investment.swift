@@ -219,10 +219,10 @@ final class Investment {
     // MARK: - CSV 匯出
 
     /// CSV 表頭
-    static let csvHeader = "標的,買入日期,買入價格,原始數量,目前數量,狀態,賣出日期,賣出價格,賣出數量,已實現損益,買入理由,賣出理由,買入大盤,賣出大盤"
+    static let csvHeader = "標的,買入日期,買入價格,原始數量,目前數量,狀態,賣出日期,賣出價格,賣出數量,已實現損益,買入理由,賣出理由,買入大盤,賣出大盤,市場,交易方向,進場理由,預定進場價,初始停損價,情緒分數,出場理由,反思,R-Multiple"
 
-    /// 將單筆紀錄轉為 CSV 行
-    var csvRow: String {
+    /// 將單筆紀錄轉為 CSV 行（可選搭配交易日誌）
+    func csvRow(journal: TradeJournal? = nil) -> String {
         let df = DateFormatter()
         df.dateFormat = "yyyy/MM/dd"
 
@@ -241,7 +241,7 @@ final class Investment {
                 : cleaned
         }
 
-        return [
+        var fields = [
             escape(ticker),
             buyDateStr,
             String(format: "%.2f", buyPrice),
@@ -256,7 +256,26 @@ final class Investment {
             escape(sellReason),
             buyMarketConditionEnum?.rawValue ?? "",
             sellMarketConditionEnum?.rawValue ?? ""
-        ].joined(separator: ",")
+        ]
+
+        // 交易日誌欄位
+        if let j = journal {
+            fields.append(contentsOf: [
+                j.market,
+                j.direction,
+                escape(j.setup),
+                j.plannedEntryPrice.map { String(format: "%.2f", $0) } ?? "",
+                j.initialStopLoss.map { String(format: "%.2f", $0) } ?? "",
+                j.emotionScore.map { String($0) } ?? "",
+                escape(j.exitReason),
+                escape(j.reflection),
+                j.rMultiple.map { String(format: "%.2f", $0) } ?? ""
+            ])
+        } else {
+            fields.append(contentsOf: Array(repeating: "", count: 9))
+        }
+
+        return fields.joined(separator: ",")
     }
 
     /// 轉換為可序列化的傳輸結構
@@ -305,10 +324,11 @@ final class Investment {
 
     // MARK: - JSON 備份匯出
 
-    /// 將所有紀錄匯出為 JSON 備份檔案 URL
-    static func exportJSON(from investments: [Investment]) -> URL? {
+    /// 將所有紀錄匯出為 JSON 備份檔案 URL（含交易日誌）
+    static func exportJSON(from investments: [Investment], journals: [TradeJournal] = []) -> URL? {
         let codables = investments.map(\.toCodable)
-        let backup = InvestmentBackup(investments: codables)
+        let journalCodables = journals.map(\.toCodable)
+        let backup = InvestmentBackup(investments: codables, journals: journalCodables)
 
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -330,9 +350,11 @@ final class Investment {
         }
     }
 
-    /// 將所有紀錄匯出為 CSV 檔案 URL
-    static func exportCSV(from investments: [Investment]) -> URL? {
-        let csv = csvHeader + "\n" + investments.map(\.csvRow).joined(separator: "\n")
+    /// 將所有紀錄匯出為 CSV 檔案 URL（可選搭配交易日誌）
+    static func exportCSV(from investments: [Investment], journals: [TradeJournal] = []) -> URL? {
+        let journalMap = Dictionary(uniqueKeysWithValues: journals.map { ($0.investmentID, $0) })
+        let rows = investments.map { inv in inv.csvRow(journal: journalMap[inv.id]) }
+        let csv = csvHeader + "\n" + rows.joined(separator: "\n")
 
         let tempDir = FileManager.default.temporaryDirectory
         let df = DateFormatter()
@@ -519,11 +541,14 @@ struct InvestmentBackup: Codable, Sendable {
     let exportDate: Date
     let recordCount: Int
     let investments: [CodableInvestment]
+    /// V2 新增：交易日誌（舊版備份此欄位為 nil）
+    let journals: [CodableTradeJournal]?
 
-    init(investments: [CodableInvestment]) {
-        self.version = 1
+    init(investments: [CodableInvestment], journals: [CodableTradeJournal] = []) {
+        self.version = journals.isEmpty ? 1 : 2
         self.exportDate = Date()
         self.recordCount = investments.count
         self.investments = investments
+        self.journals = journals.isEmpty ? nil : journals
     }
 }

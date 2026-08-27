@@ -17,6 +17,14 @@ struct ToolboxView: View {
                 ScrollView {
                     VStack(spacing: 12) {
                         toolCard(
+                            title: "交易日誌",
+                            subtitle: "瀏覽所有交易日誌，查看 R-Multiple 統計與停損紀律分析",
+                            icon: "book.fill",
+                            iconColor: AppColor.softUp,
+                            destination: TradeJournalListView()
+                        )
+
+                        toolCard(
                             title: "房貸試算",
                             subtitle: "計算每月還款金額、總利息與攤還表",
                             icon: "house.fill",

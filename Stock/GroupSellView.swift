@@ -41,6 +41,11 @@ struct GroupSellView: View {
                             reasonCard
                                 .id("reasonCard")
 
+                            // MARK: - 出場覆盤
+                            if !vm.journals.isEmpty {
+                                reviewCard
+                            }
+
                             // MARK: - 預覽損益
                             profitPreviewCard
 
@@ -79,6 +84,9 @@ struct GroupSellView: View {
                 Button("確定", role: .cancel) {}
             } message: {
                 Text(vm.alertMessage)
+            }
+            .onAppear {
+                vm.loadJournals(context: modelContext)
             }
         }
     }
@@ -209,6 +217,113 @@ struct GroupSellView: View {
         .cardStyle()
     }
 
+    // MARK: - 出場覆盤卡片
+
+    private var reviewCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    vm.reviewExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "book.closed.fill")
+                        .foregroundStyle(AppColor.secondary)
+                    Text("出場覆盤")
+                        .font(.warmHeadline())
+                        .foregroundStyle(AppColor.textMain)
+                    Spacer()
+                    if vm.hasReviewContent {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.warmCaption())
+                            .foregroundStyle(AppColor.secondary)
+                    }
+                    Image(systemName: vm.reviewExpanded ? "chevron.up" : "chevron.down")
+                        .font(.warmCaption())
+                        .foregroundStyle(AppColor.textSecondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if vm.reviewExpanded {
+                VStack(alignment: .leading, spacing: 14) {
+                    AppColor.divider.frame(height: 1)
+                        .padding(.top, 12)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "tag")
+                                .font(.warmCaption2())
+                                .foregroundStyle(AppColor.secondary)
+                            Text("出場理由")
+                                .font(.warmCaption())
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+
+                        HStack(spacing: 6) {
+                            ForEach(ExitReasonOption.allCases) { option in
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        vm.exitReasonOption = vm.exitReasonOption == option ? nil : option
+                                    }
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: option.icon)
+                                            .font(.warmCaption2())
+                                        Text(option.rawValue)
+                                            .font(.warmCaption2())
+                                    }
+                                    .fontWeight(.medium)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        vm.exitReasonOption == option
+                                            ? exitReasonColor(option)
+                                            : AppColor.background
+                                    )
+                                    .foregroundStyle(
+                                        vm.exitReasonOption == option
+                                            ? .white
+                                            : AppColor.textMain
+                                    )
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    if vm.exitReasonOption == .custom {
+                        TextField("描述你的出場理由...", text: $vm.customExitReason)
+                            .font(.warmBody())
+                            .padding(10)
+                            .background(AppColor.background)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
+                    NotebookTextField(
+                        placeholder: "如果重來一次，我會怎麼做？",
+                        text: $vm.reflection,
+                        lineLimit: 3,
+                        icon: "lightbulb",
+                        iconColor: AppColor.secondary
+                    )
+                }
+            }
+        }
+        .cardStyle()
+    }
+
+    private func exitReasonColor(_ option: ExitReasonOption) -> Color {
+        switch option {
+        case .stopLoss:  return AppColor.softDown
+        case .takeProfit: return AppColor.secondary
+        case .panicSell: return AppColor.softUp
+        case .custom:    return AppColor.primary
+        }
+    }
+
     // MARK: - 預覽損益
 
     @ViewBuilder
@@ -287,5 +402,5 @@ struct GroupSellView: View {
     let inv2 = Investment(ticker: "2330", buyDate: Date(), buyPrice: 600, quantity: 300)
     let group = PortfolioGroup(id: "2330", ticker: "2330", investments: [inv1, inv2])
     return GroupSellView(group: group)
-        .modelContainer(for: Investment.self, inMemory: true)
+        .modelContainer(for: [Investment.self, TradeJournal.self], inMemory: true)
 }

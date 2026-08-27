@@ -27,6 +27,7 @@ final class DataTransferViewModel {
     // MARK: - 資料（由 @Query 橋接）
 
     var allInvestments: [Investment] = []
+    var allJournals: [TradeJournal] = []
 
     // MARK: - 匯出狀態
 
@@ -46,7 +47,7 @@ final class DataTransferViewModel {
     // MARK: - 匯出
 
     func exportBackup() {
-        guard let url = Investment.exportJSON(from: allInvestments) else {
+        guard let url = Investment.exportJSON(from: allInvestments, journals: allJournals) else {
             errorMessage = "匯出失敗，請稍後再試"
             showingError = true
             return
@@ -130,6 +131,20 @@ final class DataTransferViewModel {
             }
         }
 
+        // 合併交易日誌
+        if let journals = backup.journals {
+            let journalDescriptor = FetchDescriptor<TradeJournal>()
+            let existingJournals = (try? context.fetch(journalDescriptor)) ?? []
+            let existingJournalIDs = Set(existingJournals.map(\.id))
+
+            for codable in journals {
+                if !existingJournalIDs.contains(codable.id) {
+                    let journal = TradeJournal.fromCodable(codable)
+                    context.insert(journal)
+                }
+            }
+        }
+
         return ImportResult(
             totalInFile: backup.investments.count,
             inserted: inserted,
@@ -146,9 +161,24 @@ final class DataTransferViewModel {
             context.delete(item)
         }
 
+        // 刪除所有現有日誌
+        let journalDescriptor = FetchDescriptor<TradeJournal>()
+        let existingJournals = (try? context.fetch(journalDescriptor)) ?? []
+        for journal in existingJournals {
+            context.delete(journal)
+        }
+
         for codable in backup.investments {
             let investment = Investment.fromCodable(codable)
             context.insert(investment)
+        }
+
+        // 匯入日誌
+        if let journals = backup.journals {
+            for codable in journals {
+                let journal = TradeJournal.fromCodable(codable)
+                context.insert(journal)
+            }
         }
 
         return ImportResult(

@@ -13,6 +13,7 @@ struct StockApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Investment.self,
+            TradeJournal.self,
         ])
         let modelConfiguration = ModelConfiguration(
             schema: schema,

@@ -289,6 +289,80 @@ struct MarketConditionPicker: View {
     }
 }
 
+// MARK: - 情緒分數選擇器
+
+/// 情緒分數膠囊按鈕列：1 (極度恐慌) ~ 5 (極度貪婪)
+struct EmotionScorePicker: View {
+    @Binding var selection: Int?
+
+    private let scores: [(value: Int, label: String, color: Color)] = [
+        (1, "1 恐慌", AppColor.softDown),
+        (2, "2 不安", AppColor.softDown.opacity(0.6)),
+        (3, "3 中立", AppColor.textSecondary),
+        (4, "4 樂觀", AppColor.softUp.opacity(0.6)),
+        (5, "5 貪婪", AppColor.softUp),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: "brain.head.profile")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("當下情緒分數")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            HStack(spacing: 4) {
+                ForEach(scores, id: \.value) { score in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            selection = selection == score.value ? nil : score.value
+                        }
+                    } label: {
+                        Text(score.label)
+                            .font(.warmCaption2())
+                            .fontWeight(.medium)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(
+                                selection == score.value
+                                    ? score.color
+                                    : AppColor.background
+                            )
+                            .foregroundStyle(
+                                selection == score.value
+                                    ? .white
+                                    : AppColor.textMain
+                            )
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - R-Multiple 色彩工具
+
+extension Color {
+    /// 根據 R-Multiple 值返回對應色彩
+    /// R ≥ 1：綠色、0 < R < 1：橙色、R ≈ -1：灰色、R < -1：紅色警示
+    static func rMultipleColor(_ r: Double) -> Color {
+        if r >= 1 {
+            return AppColor.secondary  // 綠色
+        } else if r > 0 {
+            return AppColor.softUp     // 橙色
+        } else if r >= -1 {
+            return AppColor.textSecondary  // 灰色
+        } else {
+            return AppColor.softDown   // 紅色警示（凹單）
+        }
+    }
+}
+
 // MARK: - 系統分享表單
 
 /// 包裝 UIActivityViewController 供 SwiftUI 使用

@@ -23,8 +23,28 @@ final class SellViewModel {
     var showingAlert: Bool = false
     var alertMessage: String = ""
 
+    // MARK: - 出場覆盤 (Review)
+    /// 關聯的交易日誌（如果有）
+    var journal: TradeJournal?
+    /// 是否展開覆盤區塊
+    var reviewExpanded: Bool = false
+    /// 出場理由選項
+    var exitReasonOption: ExitReasonOption? = nil
+    /// 自訂出場理由文字
+    var customExitReason: String = ""
+    /// 反思筆記
+    var reflection: String = ""
+
     init(investment: Investment) {
         self.investment = investment
+    }
+
+    /// 載入關聯的交易日誌
+    func loadJournal(context: ModelContext) {
+        journal = TradeJournalViewModel.fetchJournal(for: investment.id, context: context)
+        if journal != nil {
+            reviewExpanded = true
+        }
     }
 
     // MARK: - Computed
@@ -43,6 +63,34 @@ final class SellViewModel {
             profitLoss: profitLoss,
             returnPct: returnPct
         )
+    }
+
+    /// 即時預覽 R-Multiple（需有停損價）
+    var rMultiplePreview: Double? {
+        guard let sellPrice = Double(sellPriceText),
+              sellPrice > 0,
+              let stopLoss = journal?.initialStopLoss else { return nil }
+        return TradeJournal.calculateRMultiple(
+            entryPrice: investment.buyPrice,
+            exitPrice: sellPrice,
+            stopLoss: stopLoss
+        )
+    }
+
+    /// 組合出場理由文字
+    var composedExitReason: String {
+        if let option = exitReasonOption {
+            if option == .custom {
+                return customExitReason.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            return option.rawValue
+        }
+        return ""
+    }
+
+    /// 是否有覆盤內容
+    var hasReviewContent: Bool {
+        exitReasonOption != nil || !reflection.isEmpty
     }
 
     // MARK: - Actions
@@ -76,6 +124,21 @@ final class SellViewModel {
             marketCondition: sellMarketCondition,
             context: context
         )
+
+        // 更新交易日誌的覆盤資料
+        if let journal = journal, hasReviewContent {
+            journal.exitReason = composedExitReason
+            journal.reflection = reflection.trimmingCharacters(in: .whitespacesAndNewlines)
+            // 計算 R-Multiple
+            if let stopLoss = journal.initialStopLoss {
+                journal.rMultiple = TradeJournal.calculateRMultiple(
+                    entryPrice: investment.buyPrice,
+                    exitPrice: sellPrice,
+                    stopLoss: stopLoss
+                )
+            }
+        }
+
         return true
     }
 }

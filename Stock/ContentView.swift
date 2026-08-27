@@ -50,5 +50,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: Investment.self, inMemory: true)
+        .modelContainer(for: [Investment.self, TradeJournal.self], inMemory: true)
 }

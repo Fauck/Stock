@@ -290,5 +290,5 @@ struct SoldRecordsView: View {
 
 #Preview {
     SoldRecordsView()
-        .modelContainer(for: Investment.self, inMemory: true)
+        .modelContainer(for: [Investment.self, TradeJournal.self], inMemory: true)
 }

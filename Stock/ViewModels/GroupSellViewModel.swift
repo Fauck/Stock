@@ -15,8 +15,41 @@ final class GroupSellViewModel {
     var showingAlert: Bool = false
     var alertMessage: String = ""
 
+    // MARK: - 出場覆盤 (Review)
+    var reviewExpanded: Bool = false
+    var exitReasonOption: ExitReasonOption? = nil
+    var customExitReason: String = ""
+    var reflection: String = ""
+    /// 群組中所有有日誌的 Investment 的日誌
+    var journals: [TradeJournal] = []
+
     init(group: PortfolioGroup) {
         self.group = group
+    }
+
+    /// 載入群組中所有投資的日誌
+    func loadJournals(context: ModelContext) {
+        let investmentIDs = group.investments.map(\.id)
+        let descriptor = FetchDescriptor<TradeJournal>()
+        guard let allJournals = try? context.fetch(descriptor) else { return }
+        journals = allJournals.filter { investmentIDs.contains($0.investmentID) }
+        if !journals.isEmpty {
+            reviewExpanded = true
+        }
+    }
+
+    var composedExitReason: String {
+        if let option = exitReasonOption {
+            if option == .custom {
+                return customExitReason.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            return option.rawValue
+        }
+        return ""
+    }
+
+    var hasReviewContent: Bool {
+        exitReasonOption != nil || !reflection.isEmpty
     }
 
     // MARK: - Computed
@@ -69,6 +102,24 @@ final class GroupSellViewModel {
             marketCondition: sellMarketCondition,
             context: context
         )
+
+        // 更新所有關聯日誌的覆盤資料
+        if hasReviewContent {
+            for journal in journals {
+                journal.exitReason = composedExitReason
+                journal.reflection = reflection.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let stopLoss = journal.initialStopLoss {
+                    let entryPrice = group.investments
+                        .first { $0.id == journal.investmentID }?.buyPrice ?? group.weightedAverageCost
+                    journal.rMultiple = TradeJournal.calculateRMultiple(
+                        entryPrice: entryPrice,
+                        exitPrice: sellPrice,
+                        stopLoss: stopLoss
+                    )
+                }
+            }
+        }
+
         return true
     }
 }

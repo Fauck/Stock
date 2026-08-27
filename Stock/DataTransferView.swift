@@ -15,6 +15,8 @@ struct DataTransferView: View {
     @Query(sort: \Investment.buyDate, order: .reverse)
     private var allInvestments: [Investment]
 
+    @Query private var allJournals: [TradeJournal]
+
     @State private var vm = DataTransferViewModel()
 
     var body: some View {
@@ -78,8 +80,12 @@ struct DataTransferView: View {
         } message: {
             Text(vm.errorMessage)
         }
-        .onAppear { vm.allInvestments = allInvestments }
+        .onAppear {
+            vm.allInvestments = allInvestments
+            vm.allJournals = allJournals
+        }
         .onChange(of: allInvestments) { _, newValue in vm.allInvestments = newValue }
+        .onChange(of: allJournals) { _, newValue in vm.allJournals = newValue }
     }
 
     // MARK: - 匯出卡片
@@ -204,5 +210,5 @@ struct DataTransferView: View {
     NavigationStack {
         DataTransferView()
     }
-    .modelContainer(for: Investment.self, inMemory: true)
+    .modelContainer(for: [Investment.self, TradeJournal.self], inMemory: true)
 }

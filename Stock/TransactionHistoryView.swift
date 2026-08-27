@@ -19,6 +19,9 @@ struct TransactionHistoryView: View {
     @Query(sort: \Investment.buyDate, order: .reverse)
     private var allRecordsForExport: [Investment]
 
+    /// 所有交易日誌
+    @Query private var allJournals: [TradeJournal]
+
     @State private var vm = TransactionHistoryViewModel()
 
     var body: some View {
@@ -71,12 +74,16 @@ struct TransactionHistoryView: View {
             .onAppear {
                 vm.allInvestments = allInvestments
                 vm.allRecordsForExport = allRecordsForExport
+                vm.allJournals = allJournals
             }
             .onChange(of: allInvestments) { _, newValue in
                 vm.allInvestments = newValue
             }
             .onChange(of: allRecordsForExport) { _, newValue in
                 vm.allRecordsForExport = newValue
+            }
+            .onChange(of: allJournals) { _, newValue in
+                vm.allJournals = newValue
             }
         }
     }
@@ -204,15 +211,25 @@ struct TransactionHistoryView: View {
 
                 // 逐筆紀錄
                 ForEach(vm.filteredInvestments) { investment in
-                    transactionCard(for: investment)
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                vm.confirmDelete(investment)
-                            } label: {
-                                Label("刪除紀錄", systemImage: "trash")
-                            }
+                    let journal = vm.journal(for: investment.id)
+                    NavigationLink {
+                        if let journal = journal {
+                            TradeJournalDetailView(investment: investment, journal: journal)
+                        } else {
+                            TradeJournalEditView(investment: investment, existingJournal: nil)
                         }
-                        .padding(.horizontal, 16)
+                    } label: {
+                        transactionCard(for: investment, journal: journal)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            vm.confirmDelete(investment)
+                        } label: {
+                            Label("刪除紀錄", systemImage: "trash")
+                        }
+                    }
+                    .padding(.horizontal, 16)
                 }
             }
             .padding(.vertical, 12)
@@ -239,9 +256,9 @@ struct TransactionHistoryView: View {
 
     // MARK: - 單筆交易卡片
 
-    private func transactionCard(for investment: Investment) -> some View {
+    private func transactionCard(for investment: Investment, journal: TradeJournal?) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            // 第一列：標的 + 買入大盤 + 狀態 + 日期
+            // 第一列：標的 + 買入大盤 + 日誌指示 + 狀態 + 日期
             HStack {
                 Text(StockMapping.displayName(for: investment.ticker))
                     .font(.warmHeadline())
@@ -251,6 +268,11 @@ struct TransactionHistoryView: View {
                         .font(.warmCaption2())
                         .fontWeight(.medium)
                         .foregroundStyle(mc.color)
+                }
+                if journal != nil {
+                    Image(systemName: "book.fill")
+                        .font(.warmCaption2())
+                        .foregroundStyle(AppColor.secondary.opacity(0.6))
                 }
                 Spacer()
                 statusBadge(for: investment)
@@ -317,6 +339,60 @@ struct TransactionHistoryView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
 
+            // R-Multiple 顯示（已平倉且有日誌）
+            if investment.isClosed, let r = journal?.rMultiple {
+                HStack(spacing: 6) {
+                    Image(systemName: "chart.bar.doc.horizontal")
+                        .font(.warmCaption2())
+                        .foregroundStyle(Color.rMultipleColor(r))
+                    Text(String(format: "%+.2fR", r))
+                        .font(.warmCaption())
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.rMultipleColor(r))
+                    if r < -1 {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.warmCaption2())
+                            .foregroundStyle(AppColor.softDown)
+                    }
+                    Spacer()
+                    if journal != nil {
+                        HStack(spacing: 2) {
+                            Text("查看日誌")
+                                .font(.warmCaption2())
+                            Image(systemName: "chevron.right")
+                                .font(.warmCaption2())
+                        }
+                        .foregroundStyle(AppColor.textSecondary.opacity(0.6))
+                    }
+                }
+            } else if journal != nil {
+                // 有日誌但未平倉
+                HStack {
+                    Spacer()
+                    HStack(spacing: 2) {
+                        Text("查看日誌")
+                            .font(.warmCaption2())
+                        Image(systemName: "chevron.right")
+                            .font(.warmCaption2())
+                    }
+                    .foregroundStyle(AppColor.textSecondary.opacity(0.6))
+                }
+            } else {
+                // 無日誌：顯示新增日誌提示
+                HStack {
+                    Spacer()
+                    HStack(spacing: 2) {
+                        Image(systemName: "plus.circle")
+                            .font(.warmCaption2())
+                        Text("新增日誌")
+                            .font(.warmCaption2())
+                        Image(systemName: "chevron.right")
+                            .font(.warmCaption2())
+                    }
+                    .foregroundStyle(AppColor.textSecondary.opacity(0.5))
+                }
+            }
+
             // 買入理由
             if !investment.buyReason.isEmpty {
                 HStack(alignment: .top, spacing: 6) {
@@ -363,5 +439,5 @@ struct TransactionHistoryView: View {
 
 #Preview {
     TransactionHistoryView()
-        .modelContainer(for: Investment.self, inMemory: true)
+        .modelContainer(for: [Investment.self, TradeJournal.self], inMemory: true)
 }

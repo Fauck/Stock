@@ -16,6 +16,12 @@ final class TransactionHistoryViewModel {
     // MARK: - Data (bridged from @Query)
     var allInvestments: [Investment] = []
     var allRecordsForExport: [Investment] = []
+    var allJournals: [TradeJournal] = []
+
+    /// 根據 Investment ID 查詢對應的交易日誌
+    func journal(for investmentID: UUID) -> TradeJournal? {
+        allJournals.first { $0.investmentID == investmentID }
+    }
 
     // MARK: - State
     var selectedFilter: DateFilterOption = .all
@@ -60,7 +66,7 @@ final class TransactionHistoryViewModel {
     // MARK: - Actions
 
     func exportCSV() {
-        if let url = Investment.exportCSV(from: allRecordsForExport) {
+        if let url = Investment.exportCSV(from: allRecordsForExport, journals: allJournals) {
             csvFileURL = url
             showingShareSheet = true
         }

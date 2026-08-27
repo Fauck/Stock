@@ -41,6 +41,12 @@ struct SellView: View {
                             reasonCard
                                 .id("reasonCard")
 
+                            // MARK: - 出場覆盤（如果有日誌）
+                            if vm.journal != nil {
+                                reviewCard
+                                    .id("reviewCard")
+                            }
+
                             // MARK: - 預覽損益
                             profitPreviewCard
                         }
@@ -76,6 +82,9 @@ struct SellView: View {
                 Button("確定", role: .cancel) {}
             } message: {
                 Text(vm.alertMessage)
+            }
+            .onAppear {
+                vm.loadJournal(context: modelContext)
             }
         }
     }
@@ -196,6 +205,168 @@ struct SellView: View {
         .cardStyle()
     }
 
+    // MARK: - 出場覆盤卡片
+
+    private var reviewCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // 標題列
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    vm.reviewExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "book.closed.fill")
+                        .foregroundStyle(AppColor.secondary)
+                    Text("出場覆盤")
+                        .font(.warmHeadline())
+                        .foregroundStyle(AppColor.textMain)
+                    Spacer()
+                    if vm.hasReviewContent {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.warmCaption())
+                            .foregroundStyle(AppColor.secondary)
+                    }
+                    Image(systemName: vm.reviewExpanded ? "chevron.up" : "chevron.down")
+                        .font(.warmCaption())
+                        .foregroundStyle(AppColor.textSecondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if vm.reviewExpanded {
+                VStack(alignment: .leading, spacing: 14) {
+                    AppColor.divider.frame(height: 1)
+                        .padding(.top, 12)
+
+                    // 進場資訊摘要
+                    if let journal = vm.journal, journal.hasPlan {
+                        HStack(spacing: 10) {
+                            if let stopLoss = journal.initialStopLoss {
+                                WarmInfoBadge(
+                                    title: "停損價",
+                                    value: String(format: "$%.2f", stopLoss),
+                                    valueColor: AppColor.softDown
+                                )
+                            }
+                            if let planned = journal.plannedEntryPrice {
+                                WarmInfoBadge(
+                                    title: "預定進場",
+                                    value: String(format: "$%.2f", planned)
+                                )
+                            }
+                            Spacer()
+                        }
+                        .padding(10)
+                        .background(AppColor.background.opacity(0.6))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+
+                    // 出場理由選項
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "tag")
+                                .font(.warmCaption2())
+                                .foregroundStyle(AppColor.secondary)
+                            Text("出場理由")
+                                .font(.warmCaption())
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+
+                        HStack(spacing: 6) {
+                            ForEach(ExitReasonOption.allCases) { option in
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        vm.exitReasonOption = vm.exitReasonOption == option ? nil : option
+                                    }
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: option.icon)
+                                            .font(.warmCaption2())
+                                        Text(option.rawValue)
+                                            .font(.warmCaption2())
+                                    }
+                                    .fontWeight(.medium)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        vm.exitReasonOption == option
+                                            ? exitReasonColor(option)
+                                            : AppColor.background
+                                    )
+                                    .foregroundStyle(
+                                        vm.exitReasonOption == option
+                                            ? .white
+                                            : AppColor.textMain
+                                    )
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    // 自訂理由輸入
+                    if vm.exitReasonOption == .custom {
+                        TextField("描述你的出場理由...", text: $vm.customExitReason)
+                            .font(.warmBody())
+                            .padding(10)
+                            .background(AppColor.background)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
+                    // 反思筆記
+                    NotebookTextField(
+                        placeholder: "如果重來一次，我會怎麼做？",
+                        text: $vm.reflection,
+                        lineLimit: 3,
+                        icon: "lightbulb",
+                        iconColor: AppColor.secondary
+                    )
+
+                    // R-Multiple 即時預覽
+                    if let r = vm.rMultiplePreview {
+                        HStack {
+                            Image(systemName: "chart.bar.doc.horizontal")
+                                .foregroundStyle(Color.rMultipleColor(r))
+                            Text("R-Multiple")
+                                .font(.warmCaption())
+                                .foregroundStyle(AppColor.textSecondary)
+                            Spacer()
+                            Text(String(format: "%+.2fR", r))
+                                .font(.warmHeadline())
+                                .foregroundStyle(Color.rMultipleColor(r))
+                        }
+                        .padding(10)
+                        .background(Color.rMultipleColor(r).opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                        if r < -1 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.warmCaption2())
+                                Text("R < -1：未嚴格執行停損，請留意風險控管")
+                                    .font(.warmCaption2())
+                            }
+                            .foregroundStyle(AppColor.softDown)
+                        }
+                    }
+                }
+            }
+        }
+        .cardStyle()
+    }
+
+    private func exitReasonColor(_ option: ExitReasonOption) -> Color {
+        switch option {
+        case .stopLoss:  return AppColor.softDown
+        case .takeProfit: return AppColor.secondary
+        case .panicSell: return AppColor.softUp
+        case .custom:    return AppColor.primary
+        }
+    }
+
     // MARK: - 預覽損益
 
     @ViewBuilder
@@ -262,5 +433,5 @@ struct SellView: View {
         quantity: 1000
     )
     return SellView(investment: investment)
-        .modelContainer(for: Investment.self, inMemory: true)
+        .modelContainer(for: [Investment.self, TradeJournal.self], inMemory: true)
 }

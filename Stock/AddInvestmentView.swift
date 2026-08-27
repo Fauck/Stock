@@ -41,6 +41,10 @@ struct AddInvestmentView: View {
                             reasonCard
                                 .id("reasonCard")
 
+                            // MARK: - 交易日誌（進場前 + 執行中）
+                            journalCard
+                                .id("journalCard")
+
                             // MARK: - 預覽成本
                             costPreviewCard
                         }
@@ -230,6 +234,166 @@ struct AddInvestmentView: View {
         .cardStyle()
     }
 
+    // MARK: - 交易日誌卡片
+
+    private var journalCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // 標題列（點擊展開/收合）
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    vm.journalExpanded.toggle()
+                    if vm.journalExpanded {
+                        vm.autoDetectMarket()
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "book.fill")
+                        .foregroundStyle(AppColor.secondary)
+                    Text("交易日誌")
+                        .font(.warmHeadline())
+                        .foregroundStyle(AppColor.textMain)
+                    Spacer()
+                    if vm.hasJournalContent {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.warmCaption())
+                            .foregroundStyle(AppColor.secondary)
+                    }
+                    Image(systemName: vm.journalExpanded ? "chevron.up" : "chevron.down")
+                        .font(.warmCaption())
+                        .foregroundStyle(AppColor.textSecondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if vm.journalExpanded {
+                VStack(alignment: .leading, spacing: 14) {
+                    AppColor.divider.frame(height: 1)
+                        .padding(.top, 12)
+
+                    // 市場 & 方向
+                    HStack(spacing: 12) {
+                        // 市場標註
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("市場")
+                                .font(.warmCaption())
+                                .foregroundStyle(AppColor.textSecondary)
+                            HStack(spacing: 6) {
+                                ForEach(TradeMarket.allCases) { market in
+                                    Button {
+                                        vm.tradeMarket = market
+                                    } label: {
+                                        Text(market.rawValue)
+                                            .font(.warmCaption2())
+                                            .fontWeight(.medium)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(
+                                                vm.tradeMarket == market
+                                                    ? AppColor.secondary
+                                                    : AppColor.background
+                                            )
+                                            .foregroundStyle(
+                                                vm.tradeMarket == market
+                                                    ? .white
+                                                    : AppColor.textMain
+                                            )
+                                            .clipShape(Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        Spacer()
+
+                        // 交易方向
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("方向")
+                                .font(.warmCaption())
+                                .foregroundStyle(AppColor.textSecondary)
+                            HStack(spacing: 6) {
+                                ForEach(TradeDirection.allCases) { dir in
+                                    Button {
+                                        vm.tradeDirection = dir
+                                    } label: {
+                                        Text(dir.rawValue)
+                                            .font(.warmCaption2())
+                                            .fontWeight(.medium)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(
+                                                vm.tradeDirection == dir
+                                                    ? (dir == .long ? AppColor.softUp : AppColor.softDown)
+                                                    : AppColor.background
+                                            )
+                                            .foregroundStyle(
+                                                vm.tradeDirection == dir
+                                                    ? .white
+                                                    : AppColor.textMain
+                                            )
+                                            .clipShape(Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+
+                    // 進場理由 (Setup)
+                    NotebookTextField(
+                        placeholder: "進場理由（技術面/基本面觸發條件）...",
+                        text: $vm.journalSetup,
+                        lineLimit: 3,
+                        icon: "lightbulb",
+                        iconColor: AppColor.secondary
+                    )
+
+                    // 預定進場價 & 初始停損價
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.right.circle")
+                                    .font(.warmCaption2())
+                                    .foregroundStyle(AppColor.secondary)
+                                Text("預定進場價")
+                                    .font(.warmCaption())
+                                    .foregroundStyle(AppColor.textSecondary)
+                            }
+                            TextField("0.00", text: $vm.plannedEntryPriceText)
+                                .keyboardType(.decimalPad)
+                                .font(.warmBody())
+                                .padding(10)
+                                .background(AppColor.background)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "shield.slash")
+                                    .font(.warmCaption2())
+                                    .foregroundStyle(AppColor.softDown)
+                                Text("初始停損價 ★")
+                                    .font(.warmCaption())
+                                    .foregroundStyle(AppColor.textSecondary)
+                            }
+                            TextField("0.00", text: $vm.initialStopLossText)
+                                .keyboardType(.decimalPad)
+                                .font(.warmBody())
+                                .padding(10)
+                                .background(AppColor.background)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                    }
+
+                    // 情緒分數
+                    EmotionScorePicker(selection: $vm.emotionScore)
+                }
+            }
+        }
+        .cardStyle()
+    }
+
     // MARK: - 預覽成本
 
     @ViewBuilder
@@ -253,5 +417,5 @@ struct AddInvestmentView: View {
 
 #Preview {
     AddInvestmentView(selectedDate: Date())
-        .modelContainer(for: Investment.self, inMemory: true)
+        .modelContainer(for: [Investment.self, TradeJournal.self], inMemory: true)
 }

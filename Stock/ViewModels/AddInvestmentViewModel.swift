@@ -16,6 +16,15 @@ final class AddInvestmentViewModel {
     var showingAlert: Bool = false
     var alertMessage: String = ""
 
+    // MARK: - 交易日誌（進場前 + 執行中）
+    var journalExpanded: Bool = false
+    var tradeMarket: TradeMarket = .tw
+    var tradeDirection: TradeDirection = .long
+    var journalSetup: String = ""
+    var plannedEntryPriceText: String = ""
+    var initialStopLossText: String = ""
+    var emotionScore: Int? = nil
+
     // MARK: - 即時股價相關
     /// 解析後的股票代號（用於 API 查詢與儲存）
     var resolvedSymbol: String = ""
@@ -130,6 +139,26 @@ final class AddInvestmentViewModel {
         buyPriceText = String(format: "%.2f", price)
     }
 
+    // MARK: - 市場自動偵測
+
+    /// 根據代號自動偵測市場（含英文字母 → 美股，否則台股）
+    func autoDetectMarket() {
+        let symbol = resolvedSymbol.isEmpty
+            ? ticker.trimmingCharacters(in: .whitespacesAndNewlines)
+            : resolvedSymbol
+        let hasLetters = symbol.rangeOfCharacter(from: .letters) != nil
+        let isAllDigits = symbol.allSatisfy { $0.isNumber }
+        tradeMarket = (hasLetters && !isAllDigits) ? .us : .tw
+    }
+
+    /// 日誌是否有填寫任何欄位
+    var hasJournalContent: Bool {
+        !journalSetup.isEmpty ||
+        !plannedEntryPriceText.isEmpty ||
+        !initialStopLossText.isEmpty ||
+        emotionScore != nil
+    }
+
     // MARK: - Actions
 
     /// 儲存投資紀錄，成功回傳 true（呼叫端應 dismiss）
@@ -166,6 +195,21 @@ final class AddInvestmentViewModel {
             buyMarketCondition: buyMarketCondition
         )
         context.insert(investment)
+
+        // 建立交易日誌（如果有填寫任何日誌欄位）
+        if hasJournalContent || journalExpanded {
+            let journal = TradeJournal(
+                investmentID: investment.id,
+                market: tradeMarket,
+                direction: tradeDirection,
+                setup: journalSetup.trimmingCharacters(in: .whitespacesAndNewlines),
+                plannedEntryPrice: Double(plannedEntryPriceText),
+                initialStopLoss: Double(initialStopLossText),
+                emotionScore: emotionScore
+            )
+            context.insert(journal)
+        }
+
         return true
     }
 }

@@ -326,5 +326,5 @@ struct CalendarView: View {
 
 #Preview {
     CalendarView()
-        .modelContainer(for: Investment.self, inMemory: true)
+        .modelContainer(for: [Investment.self, TradeJournal.self], inMemory: true)
 }
