@@ -90,7 +90,7 @@ struct MortgageCalculatorView: View {
 
             HStack(spacing: 12) {
                 inputField(
-                    label: "貸款金額（萬元）",
+                    label: "房屋總價（萬元）",
                     icon: "dollarsign.circle",
                     iconColor: AppColor.secondary,
                     placeholder: "例如：1000",

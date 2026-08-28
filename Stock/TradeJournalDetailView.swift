@@ -12,6 +12,13 @@ import SwiftData
 struct TradeJournalDetailView: View {
     let investment: Investment
     let journal: TradeJournal
+    @State private var chartVM: KLineChartViewModel
+
+    init(investment: Investment, journal: TradeJournal) {
+        self.investment = investment
+        self.journal = journal
+        _chartVM = State(initialValue: KLineChartViewModel(investment: investment, journal: journal))
+    }
 
     var body: some View {
         ZStack {
@@ -24,6 +31,9 @@ struct TradeJournalDetailView: View {
 
                     // 階段一：進場前 (Plan)
                     planCard
+
+                    // K 線走勢圖
+                    KLineChartView(vm: chartVM)
 
                     // 階段二：執行中 (Action)
                     actionCard
@@ -49,6 +59,9 @@ struct TradeJournalDetailView: View {
                     Image(systemName: "pencil")
                 }
             }
+        }
+        .task {
+            await chartVM.loadCandles()
         }
     }
 

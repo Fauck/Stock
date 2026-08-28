@@ -57,6 +57,7 @@ struct PortfolioListView: View {
             .onAppear {
                 vm.investments = investments
                 vm.fetchAllPrices()
+                vm.fetchTechnicalSignals()
             }
             .onChange(of: investments) { _, newValue in
                 vm.investments = newValue
@@ -115,11 +116,12 @@ struct PortfolioListView: View {
                     .font(.warmHeadline())
                     .foregroundStyle(AppColor.textMain)
                 Spacer()
-                // 重新整理即時價
+                // 重新整理即時價 + 技術指標
                 Button {
                     vm.fetchAllPrices()
+                    vm.fetchTechnicalSignals()
                 } label: {
-                    if vm.isFetchingPrices {
+                    if vm.isFetchingPrices || vm.isFetchingSignals {
                         ProgressView()
                             .scaleEffect(0.7)
                     } else {
@@ -128,7 +130,7 @@ struct PortfolioListView: View {
                             .foregroundStyle(AppColor.primary)
                     }
                 }
-                .disabled(vm.isFetchingPrices)
+                .disabled(vm.isFetchingPrices || vm.isFetchingSignals)
             }
 
             AppColor.divider.frame(height: 1)
@@ -208,14 +210,19 @@ struct PortfolioListView: View {
                 }
             } label: {
                 HStack(spacing: 12) {
-                    // 左：中文名稱（主）+ 代號（副）
+                    // 左：中文名稱（主）+ 代號（副）+ 技術信號
                     VStack(alignment: .leading, spacing: 2) {
                         Text(vm.displayName(for: group.ticker))
                             .font(.warmHeadline())
                             .foregroundStyle(AppColor.primary)
-                        Text(group.ticker)
-                            .font(.warmCaption2())
-                            .foregroundStyle(AppColor.textSecondary)
+                        HStack(spacing: 4) {
+                            Text(group.ticker)
+                                .font(.warmCaption2())
+                                .foregroundStyle(AppColor.textSecondary)
+                            if let signal = vm.technicalSignals[group.ticker] {
+                                compactSignalBadges(signal)
+                            }
+                        }
                     }
                     .frame(minWidth: 60, alignment: .leading)
 
@@ -373,6 +380,12 @@ struct PortfolioListView: View {
                         .padding(.horizontal, 14)
                     }
 
+                    // 技術指標信號
+                    if let signal = vm.technicalSignals[group.ticker] {
+                        technicalSignalView(signal)
+                            .padding(.horizontal, 14)
+                    }
+
                     // 資訊徽章列
                     HStack {
                         WarmInfoBadge(title: "均價", value: String(format: "$%.2f", group.weightedAverageCost))
@@ -506,6 +519,99 @@ struct PortfolioListView: View {
         .padding(10)
         .background(AppColor.background.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    // MARK: - 技術指標信號顯示
+
+    /// 摺疊狀態下的精簡信號徽章
+    @ViewBuilder
+    private func compactSignalBadges(_ signal: TechnicalIndicators.SignalSummary) -> some View {
+        // 只顯示重要信號：超買超賣 或 KD 交叉
+        if let rsiSig = signal.rsiSignal, let label = rsiSig.label {
+            signalPill(label, color: rsiSig == .overbought ? AppColor.softUp : AppColor.softDown)
+        }
+        if let kdjSig = signal.kdjSignal, let label = kdjSig.label {
+            signalPill(label, color: kdjSig == .goldenCross ? AppColor.secondary : AppColor.softDown)
+        }
+    }
+
+    /// 展開狀態下的完整技術指標信號
+    private func technicalSignalView(_ signal: TechnicalIndicators.SignalSummary) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                Image(systemName: "waveform.path.ecg")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("技術指標")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+                if vm.isFetchingSignals {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                }
+            }
+
+            // 信號標籤列
+            HStack(spacing: 6) {
+                // MA5 相對位置
+                if let ma5 = signal.ma5Position {
+                    signalPill(
+                        ma5 == .above ? "MA5↑" : "MA5↓",
+                        color: ma5 == .above ? AppColor.secondary : AppColor.softDown
+                    )
+                }
+
+                // MA20 相對位置
+                if let ma20 = signal.ma20Position {
+                    signalPill(
+                        ma20 == .above ? "MA20↑" : "MA20↓",
+                        color: ma20 == .above ? AppColor.secondary : AppColor.softDown
+                    )
+                }
+
+                // RSI
+                if let rsi = signal.rsi {
+                    let rsiColor: Color = {
+                        if rsi > 80 { return AppColor.softUp }
+                        if rsi < 20 { return AppColor.softDown }
+                        return AppColor.textSecondary
+                    }()
+                    signalPill(
+                        "RSI \(String(format: "%.0f", rsi))",
+                        color: rsiColor
+                    )
+                    if let rsiSig = signal.rsiSignal, let label = rsiSig.label {
+                        signalPill(label, color: rsiSig == .overbought ? AppColor.softUp : AppColor.softDown, filled: true)
+                    }
+                }
+
+                // KDJ
+                if let k = signal.kdjK, let d = signal.kdjD {
+                    signalPill(
+                        "K\(String(format: "%.0f", k)) D\(String(format: "%.0f", d))",
+                        color: AppColor.textSecondary
+                    )
+                }
+                if let kdjSig = signal.kdjSignal, let label = kdjSig.label {
+                    signalPill(label, color: kdjSig == .goldenCross ? AppColor.secondary : AppColor.softDown, filled: true)
+                }
+            }
+        }
+        .padding(10)
+        .background(AppColor.background.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// 信號膠囊標籤
+    private func signalPill(_ text: String, color: Color, filled: Bool = false) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .medium, design: .rounded))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(filled ? color : color.opacity(0.12))
+            .foregroundStyle(filled ? .white : color)
+            .clipShape(Capsule())
     }
 }
 

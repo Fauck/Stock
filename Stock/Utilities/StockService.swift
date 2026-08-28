@@ -26,6 +26,22 @@ actor StockService {
         let previousClose: Double?
     }
 
+    /// 歷史 K 線單根蠟燭資料
+    struct CandleData: Decodable, Sendable {
+        let date: String
+        let open: Double
+        let high: Double
+        let low: Double
+        let close: Double
+        let volume: Int
+    }
+
+    /// 歷史 K 線 API 回應
+    struct HistoricalCandlesResponse: Decodable {
+        let symbol: String?
+        let data: [CandleData]
+    }
+
     /// 查詢結果：包含即時價格與股票名稱
     struct StockQuoteResult: Sendable {
         let symbol: String
@@ -104,6 +120,40 @@ actor StockService {
         return try JSONDecoder().decode(TickerResponse.self, from: data)
     }
 
+    /// 取得歷史 K 線資料（最多回溯 1 年）
+    func fetchHistoricalCandles(
+        symbol: String,
+        from: String,
+        to: String
+    ) async throws -> HistoricalCandlesResponse {
+        let urlString = "\(baseURL)/historical/candles/\(symbol)?from=\(from)&to=\(to)&fields=open,high,low,close,volume"
+        guard let url = URL(string: urlString) else {
+            throw StockServiceError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
+        request.timeoutInterval = 15
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw StockServiceError.invalidResponse
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            throw StockServiceError.httpError(httpResponse.statusCode)
+        }
+
+        let result = try JSONDecoder().decode(HistoricalCandlesResponse.self, from: data)
+
+        guard !result.data.isEmpty else {
+            throw StockServiceError.noData
+        }
+
+        return result
+    }
+
     /// 批次取得多檔即時報價
     func fetchQuotes(symbols: [String]) async -> [String: StockQuoteResult] {
         var results: [String: StockQuoteResult] = [:]
@@ -138,6 +188,7 @@ enum StockServiceError: LocalizedError {
     case invalidResponse
     case httpError(Int)
     case noPrice
+    case noData
 
     var errorDescription: String? {
         switch self {
@@ -145,6 +196,7 @@ enum StockServiceError: LocalizedError {
         case .invalidResponse: return "無效的伺服器回應"
         case .httpError(let code): return "API 錯誤（HTTP \(code)）"
         case .noPrice: return "目前無即時報價"
+        case .noData: return "查無歷史資料"
         }
     }
 }

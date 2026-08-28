@@ -17,6 +17,11 @@ final class PortfolioListViewModel {
     var dailyChangePercents: [String: Double] = [:]
     var expandedTicker: String?
 
+    /// 技術指標信號 [ticker: SignalSummary]
+    var technicalSignals: [String: TechnicalIndicators.SignalSummary] = [:]
+    /// 是否正在載入技術指標
+    var isFetchingSignals: Bool = false
+
     /// API 查到的中文名稱快取 [symbol: name]
     var stockNames: [String: String] = [:]
 
@@ -36,6 +41,7 @@ final class PortfolioListViewModel {
     var showingDeleteAlert: Bool = false
 
     private var fetchTask: Task<Void, Never>?
+    private var signalTask: Task<Void, Never>?
 
     // MARK: - Computed
 
@@ -176,6 +182,83 @@ final class PortfolioListViewModel {
                 }
             }
             isFetchingPrices = false
+        }
+    }
+
+    // MARK: - 技術指標載入
+
+    /// 批次載入所有持有標的的技術指標信號
+    /// 需要歷史 K 線資料（最近 30 個交易日 ≈ 45 日曆日）
+    func fetchTechnicalSignals() {
+        let tickers = groups.map(\.ticker)
+        guard !tickers.isEmpty else { return }
+
+        signalTask?.cancel()
+        signalTask = Task { @MainActor in
+            isFetchingSignals = true
+
+            let calendar = Calendar.current
+            let today = Date()
+            let fromDate = calendar.date(byAdding: .day, value: -60, to: today) ?? today
+
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            let fromStr = formatter.string(from: fromDate)
+            let toStr = formatter.string(from: today)
+
+            // 預先解析代號（MainActor 上）
+            var tickerSymbols: [(String, String)] = []
+            for ticker in tickers {
+                let symbol = StockMapping.resolve(ticker).symbol
+                tickerSymbols.append((ticker, symbol))
+            }
+
+            // 定義回傳型別
+            struct CandleResult: Sendable {
+                let ticker: String
+                let closes: [Double]
+                let highs: [Double]
+                let lows: [Double]
+            }
+
+            // 並行取得歷史資料
+            let results = await withTaskGroup(of: CandleResult?.self) { group in
+                for (ticker, symbol) in tickerSymbols {
+                    group.addTask {
+                        do {
+                            let response = try await StockService.shared.fetchHistoricalCandles(
+                                symbol: symbol, from: fromStr, to: toStr
+                            )
+                            let sorted = response.data.sorted { $0.date < $1.date }
+                            return CandleResult(
+                                ticker: ticker,
+                                closes: sorted.map(\.close),
+                                highs: sorted.map(\.high),
+                                lows: sorted.map(\.low)
+                            )
+                        } catch {
+                            return nil
+                        }
+                    }
+                }
+                var collected: [CandleResult] = []
+                for await result in group {
+                    if let result { collected.append(result) }
+                }
+                return collected
+            }
+
+            // 在 MainActor 上計算信號
+            for result in results {
+                let summary = TechnicalIndicators.computeSignalSummary(
+                    closes: result.closes, highs: result.highs, lows: result.lows
+                )
+                technicalSignals[result.ticker] = summary
+            }
+
+            guard !Task.isCancelled else { return }
+            isFetchingSignals = false
         }
     }
 
