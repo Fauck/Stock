@@ -104,7 +104,7 @@ struct StockDetailSheetView: View {
     // MARK: - 技術指標信號
 
     private func technicalSignalSection(_ signal: TechnicalIndicators.SignalSummary) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 4) {
                 Image(systemName: "waveform.path.ecg")
                     .font(.warmCaption2())
@@ -114,25 +114,53 @@ struct StockDetailSheetView: View {
                     .foregroundStyle(AppColor.textSecondary)
             }
 
-            // 信號標籤列
-            HStack(spacing: 6) {
-                // MA5 相對位置
+            // 操作建議（觸發條件摘要）
+            let actionSignals = buildActionSignals(signal)
+            if !actionSignals.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(actionSignals, id: \.text) { item in
+                        HStack(spacing: 6) {
+                            Image(systemName: item.icon)
+                                .font(.system(size: 10))
+                                .foregroundStyle(item.color)
+                                .frame(width: 14)
+                            Text(item.text)
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(AppColor.textMain)
+                        }
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AppColor.background.opacity(0.6))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
+            // 均線 & 交叉
+            signalRow(title: "均線") {
                 if let ma5 = signal.ma5Position {
                     signalPill(
                         ma5 == .above ? "MA5↑" : "MA5↓",
                         color: ma5 == .above ? AppColor.secondary : AppColor.softDown
                     )
                 }
-
-                // MA20 相對位置
                 if let ma20 = signal.ma20Position {
                     signalPill(
                         ma20 == .above ? "MA20↑" : "MA20↓",
                         color: ma20 == .above ? AppColor.secondary : AppColor.softDown
                     )
                 }
+                if let maCross = signal.maCross {
+                    signalPill(
+                        maCross.label,
+                        color: maCross == .goldenCross ? AppColor.secondary : AppColor.softDown,
+                        filled: true
+                    )
+                }
+            }
 
-                // RSI
+            // RSI
+            signalRow(title: "RSI") {
                 if let rsi = signal.rsi {
                     let rsiColor: Color = {
                         if rsi > 80 { return AppColor.softUp }
@@ -147,8 +175,10 @@ struct StockDetailSheetView: View {
                         signalPill(label, color: rsiSig == .overbought ? AppColor.softUp : AppColor.softDown, filled: true)
                     }
                 }
+            }
 
-                // KDJ
+            // KDJ
+            signalRow(title: "KDJ") {
                 if let k = signal.kdjK, let d = signal.kdjD {
                     signalPill(
                         "K\(String(format: "%.0f", k)) D\(String(format: "%.0f", d))",
@@ -159,11 +189,136 @@ struct StockDetailSheetView: View {
                     signalPill(label, color: kdjSig == .goldenCross ? AppColor.secondary : AppColor.softDown, filled: true)
                 }
             }
+
+            // MACD
+            signalRow(title: "MACD") {
+                if let dif = signal.macdDIF, let dea = signal.macdDEA {
+                    signalPill(
+                        "DIF \(String(format: "%.2f", dif))",
+                        color: dif >= 0 ? AppColor.secondary : AppColor.softDown
+                    )
+                    signalPill(
+                        "DEA \(String(format: "%.2f", dea))",
+                        color: dea >= 0 ? AppColor.secondary : AppColor.softDown
+                    )
+                }
+                if let macdSig = signal.macdSignal, let label = macdSig.label {
+                    signalPill(label, color: macdSig == .goldenCross ? AppColor.secondary : AppColor.softDown, filled: true)
+                }
+            }
+
+            // 布林通道 & 成交量
+            signalRow(title: "其他") {
+                if let bbSig = signal.bollingerSignal, let label = bbSig.label {
+                    signalPill(
+                        label,
+                        color: bbSig == .nearLower ? AppColor.softDown : (bbSig == .nearUpper ? AppColor.softUp : AppColor.primary),
+                        filled: true
+                    )
+                }
+                if let volSig = signal.volumeSignal, let label = volSig.label {
+                    let volColor: Color = {
+                        switch volSig {
+                        case .surge: return AppColor.softUp
+                        case .high: return AppColor.secondary
+                        case .shrink: return AppColor.textSecondary
+                        case .normal: return AppColor.textSecondary
+                        }
+                    }()
+                    signalPill(label, color: volColor, filled: true)
+                    if let ratio = signal.volumeRatio {
+                        signalPill("量比 \(String(format: "%.1f", ratio))", color: volColor)
+                    }
+                }
+            }
         }
         .padding(12)
         .background(AppColor.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
+
+    /// 指標分類行
+    private func signalRow<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(AppColor.textSecondary)
+                .frame(width: 32, alignment: .leading)
+            content()
+        }
+    }
+
+    // MARK: - 操作建議信號
+
+    private struct ActionSignalItem: Hashable {
+        let text: String
+        let icon: String
+        let color: Color
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(text)
+        }
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.text == rhs.text
+        }
+    }
+
+    private func buildActionSignals(_ signal: TechnicalIndicators.SignalSummary) -> [ActionSignalItem] {
+        var items: [ActionSignalItem] = []
+
+        // 加碼信號（偏多）
+        if let maCross = signal.maCross, maCross == .goldenCross {
+            items.append(ActionSignalItem(text: "均線金叉：短期均線上穿長期均線，趨勢轉多", icon: "arrow.up.circle.fill", color: AppColor.secondary))
+        }
+        if let macdSig = signal.macdSignal, macdSig == .goldenCross {
+            items.append(ActionSignalItem(text: "MACD 金叉：DIF 上穿 DEA，動能轉強", icon: "arrow.up.circle.fill", color: AppColor.secondary))
+        }
+        if let kdjSig = signal.kdjSignal, kdjSig == .goldenCross {
+            items.append(ActionSignalItem(text: "KD 金叉：短線動能回升，可留意加碼", icon: "arrow.up.circle.fill", color: AppColor.secondary))
+        }
+        if let rsiSig = signal.rsiSignal, rsiSig == .oversold {
+            items.append(ActionSignalItem(text: "RSI 超賣：短線或已超跌，注意反彈機會", icon: "arrow.up.circle.fill", color: AppColor.secondary))
+        }
+        if let bbSig = signal.bollingerSignal, bbSig == .nearLower {
+            items.append(ActionSignalItem(text: "觸及布林下軌：價格接近支撐帶，留意止跌反彈", icon: "arrow.up.circle.fill", color: AppColor.secondary))
+        }
+
+        // 壞出信號（偏空）
+        if let maCross = signal.maCross, maCross == .deathCross {
+            items.append(ActionSignalItem(text: "均線死叉：短期均線下穿長期均線，趨勢轉空", icon: "arrow.down.circle.fill", color: AppColor.softDown))
+        }
+        if let macdSig = signal.macdSignal, macdSig == .deathCross {
+            items.append(ActionSignalItem(text: "MACD 死叉：DIF 下穿 DEA，動能轉弱", icon: "arrow.down.circle.fill", color: AppColor.softDown))
+        }
+        if let kdjSig = signal.kdjSignal, kdjSig == .deathCross {
+            items.append(ActionSignalItem(text: "KD 死叉：短線動能轉弱，注意減碼", icon: "arrow.down.circle.fill", color: AppColor.softDown))
+        }
+        if let rsiSig = signal.rsiSignal, rsiSig == .overbought {
+            items.append(ActionSignalItem(text: "RSI 超買：短線或已過熱，注意回檔風險", icon: "arrow.down.circle.fill", color: AppColor.softDown))
+        }
+        if let bbSig = signal.bollingerSignal, bbSig == .nearUpper {
+            items.append(ActionSignalItem(text: "觸及布林上軌：價格接近壓力帶，留意回落", icon: "arrow.down.circle.fill", color: AppColor.softDown))
+        }
+
+        // 中性警示
+        if let bbSig = signal.bollingerSignal, bbSig == .squeeze {
+            items.append(ActionSignalItem(text: "布林帶收窄：波動率降低，可能即將變盤", icon: "exclamationmark.triangle.fill", color: AppColor.primary))
+        }
+        if let volSig = signal.volumeSignal {
+            switch volSig {
+            case .surge:
+                items.append(ActionSignalItem(text: "成交量爆量：量能突增，需配合價格方向判斷", icon: "exclamationmark.triangle.fill", color: AppColor.softUp))
+            case .high:
+                items.append(ActionSignalItem(text: "成交量放大：量能高於平均，關注主力動向", icon: "exclamationmark.triangle.fill", color: AppColor.secondary))
+            case .shrink:
+                items.append(ActionSignalItem(text: "成交量萎縮：市場觀望，留意突破方向", icon: "exclamationmark.triangle.fill", color: AppColor.textSecondary))
+            case .normal:
+                break
+            }
+        }
+
+        return items
     }
 
     // MARK: - 52 週區間

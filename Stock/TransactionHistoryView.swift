@@ -308,7 +308,7 @@ struct TransactionHistoryView: View {
                         WarmInfoBadge(title: "賣出量", value: String(format: "%.0f 股", sq))
                     }
                     Spacer()
-                    let pl = investment.realizedProfitLoss
+                    let pl = investment.realizedProfitLoss()
                     VStack(spacing: 2) {
                         Text("損益")
                             .font(.warmCaption2())

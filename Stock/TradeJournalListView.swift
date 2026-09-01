@@ -422,7 +422,7 @@ struct TradeJournalListView: View {
 
                     // 損益金額
                     if investment.isClosed {
-                        let pl = investment.realizedProfitLoss
+                        let pl = investment.realizedProfitLoss()
                         Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f")")
                             .font(.warmSubheadline())
                             .fontWeight(.semibold)

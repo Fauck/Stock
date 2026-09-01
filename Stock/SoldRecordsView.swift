@@ -270,8 +270,9 @@ struct SoldRecordsView: View {
             AppColor.divider.frame(height: 1)
 
             HStack {
-                let pl = investment.realizedProfitLoss
-                let pct = investment.realizedReturnPercentage
+                let fees = TradingFeeSettings.load()
+                let pl = investment.realizedProfitLoss(fees: fees)
+                let pct = investment.realizedReturnPercentage(fees: fees)
                 Spacer()
                 VStack(alignment: .trailing, spacing: 3) {
                     Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f")")

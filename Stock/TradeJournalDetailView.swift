@@ -239,7 +239,7 @@ struct TradeJournalDetailView: View {
                 HStack {
                     WarmInfoBadge(title: "出場價", value: String(format: "$%.2f", sellPrice))
                     Spacer()
-                    let pl = investment.realizedProfitLoss
+                    let pl = investment.realizedProfitLoss()
                     VStack(spacing: 2) {
                         Text("損益")
                             .font(.warmCaption2())
@@ -254,7 +254,7 @@ struct TradeJournalDetailView: View {
                     .background(Color.profitLossColor(pl).opacity(0.1))
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     Spacer()
-                    let pct = investment.realizedReturnPercentage
+                    let pct = investment.realizedReturnPercentage()
                     WarmInfoBadge(
                         title: "報酬率",
                         value: String(format: "%+.2f%%", pct),

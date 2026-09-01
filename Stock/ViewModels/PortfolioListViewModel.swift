@@ -84,14 +84,24 @@ final class PortfolioListViewModel {
         }
     }
 
+    /// 總損益（扣除手續費與交易稅）
     var totalPL: Double {
-        totalMarketValue - totalCost
+        let fees = TradingFeeSettings.load()
+        return groups.reduce(0.0) { sum, group in
+            guard let priceStr = currentPrices[group.ticker],
+                  let price = Double(priceStr), price > 0 else { return sum }
+            return sum + group.unrealizedProfitLoss(currentPrice: price, fees: fees)
+        }
     }
 
-    /// 總報酬率（百分比）
+    /// 總報酬率（百分比，扣除手續費與交易稅）
     var totalReturnPct: Double {
-        guard totalCost > 0 else { return 0 }
-        return totalPL / totalCost * 100
+        let fees = TradingFeeSettings.load()
+        let costWithFee = groups.reduce(0.0) { sum, group in
+            sum + group.totalInvested + fees.buyCommission(price: group.weightedAverageCost, quantity: group.totalQuantity)
+        }
+        guard costWithFee > 0 else { return 0 }
+        return totalPL / costWithFee * 100
     }
 
     /// 本日總損益增減 = 今日未實現損益 - 昨日未實現損益
@@ -209,6 +219,7 @@ final class PortfolioListViewModel {
         signalTask?.cancel()
         signalTask = Task { @MainActor in
             isFetchingSignals = true
+            let settings = TechnicalSettings.load()
 
             let calendar = Calendar.current
             let today = Date()
@@ -233,6 +244,7 @@ final class PortfolioListViewModel {
                 let closes: [Double]
                 let highs: [Double]
                 let lows: [Double]
+                let volumes: [Int]
             }
 
             // 並行取得歷史資料
@@ -248,7 +260,8 @@ final class PortfolioListViewModel {
                                 ticker: ticker,
                                 closes: sorted.map(\.close),
                                 highs: sorted.map(\.high),
-                                lows: sorted.map(\.low)
+                                lows: sorted.map(\.low),
+                                volumes: sorted.map(\.volume)
                             )
                         } catch {
                             return nil
@@ -265,7 +278,9 @@ final class PortfolioListViewModel {
             // 在 MainActor 上計算信號
             for result in results {
                 let summary = TechnicalIndicators.computeSignalSummary(
-                    closes: result.closes, highs: result.highs, lows: result.lows
+                    closes: result.closes, highs: result.highs, lows: result.lows,
+                    volumes: result.volumes,
+                    settings: settings
                 )
                 technicalSignals[result.ticker] = summary
             }

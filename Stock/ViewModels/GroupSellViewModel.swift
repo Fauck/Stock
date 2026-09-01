@@ -59,15 +59,19 @@ final class GroupSellViewModel {
               let sellQty = Double(sellQuantityText),
               sellPrice > 0, sellQty > 0 else { return nil }
         let avgCost = group.weightedAverageCost
-        let profitLoss = (sellPrice - avgCost) * sellQty
-        let returnPct = avgCost > 0
-            ? (sellPrice - avgCost) / avgCost * 100
+        let fees = TradingFeeSettings.load()
+        let feesTotal = fees.totalFees(buyPrice: avgCost, sellPrice: sellPrice, quantity: sellQty)
+        let profitLoss = fees.netProfitLoss(buyPrice: avgCost, sellPrice: sellPrice, quantity: sellQty)
+        let costWithFee = avgCost * sellQty + fees.buyCommission(price: avgCost, quantity: sellQty)
+        let returnPct = costWithFee > 0
+            ? profitLoss / costWithFee * 100
             : 0
         return ProfitPreview(
             sellTotal: sellPrice * sellQty,
             costTotal: avgCost * sellQty,
             profitLoss: profitLoss,
-            returnPct: returnPct
+            returnPct: returnPct,
+            totalFees: feesTotal
         )
     }
 

@@ -29,7 +29,8 @@ final class SoldRecordsViewModel {
     // MARK: - P&L Summary
 
     var totalPL: Double {
-        filteredInvestments.reduce(0.0) { $0 + $1.realizedProfitLoss }
+        let fees = TradingFeeSettings.load()
+        return filteredInvestments.reduce(0.0) { $0 + $1.realizedProfitLoss(fees: fees) }
     }
 
     var totalSellAmount: Double {

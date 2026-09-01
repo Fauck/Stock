@@ -124,9 +124,10 @@ final class Investment {
 
     // MARK: - 商業邏輯
 
-    /// 計算未實現損益
-    func unrealizedProfitLoss(currentPrice: Double) -> Double {
-        return (currentPrice - buyPrice) * quantity
+    /// 計算未實現損益（扣除手續費與交易稅）
+    func unrealizedProfitLoss(currentPrice: Double, fees: TradingFeeSettings = .defaults) -> Double {
+        let gross = (currentPrice - buyPrice) * quantity
+        return gross - fees.totalFees(buyPrice: buyPrice, sellPrice: currentPrice, quantity: quantity)
     }
 
     /// 計算投資成本（以目前持有數量計算）
@@ -139,22 +140,31 @@ final class Investment {
         return buyPrice * originalQuantity
     }
 
-    /// 計算報酬率（百分比）
-    func returnPercentage(currentPrice: Double) -> Double {
-        guard buyPrice > 0 else { return 0 }
-        return (currentPrice - buyPrice) / buyPrice * 100
+    /// 計算報酬率（百分比，扣除手續費與交易稅）
+    func returnPercentage(currentPrice: Double, fees: TradingFeeSettings = .defaults) -> Double {
+        let costWithFee = buyPrice * quantity + fees.buyCommission(price: buyPrice, quantity: quantity)
+        guard costWithFee > 0 else { return 0 }
+        let netProceeds = currentPrice * quantity
+            - fees.sellCommission(price: currentPrice, quantity: quantity)
+            - fees.transactionTax(sellPrice: currentPrice, quantity: quantity)
+        return (netProceeds - costWithFee) / costWithFee * 100
     }
 
-    /// 已實現損益（僅適用於已平倉紀錄）
-    var realizedProfitLoss: Double {
+    /// 已實現損益（扣除手續費與交易稅）
+    func realizedProfitLoss(fees: TradingFeeSettings = .defaults) -> Double {
         guard let sp = sellPrice, let sq = sellQuantity else { return 0 }
-        return (sp - buyPrice) * sq
+        return fees.netProfitLoss(buyPrice: buyPrice, sellPrice: sp, quantity: sq)
     }
 
-    /// 已實現報酬率（百分比）
-    var realizedReturnPercentage: Double {
-        guard let sp = sellPrice, buyPrice > 0 else { return 0 }
-        return (sp - buyPrice) / buyPrice * 100
+    /// 已實現報酬率（百分比，扣除手續費與交易稅）
+    func realizedReturnPercentage(fees: TradingFeeSettings = .defaults) -> Double {
+        guard let sp = sellPrice, let sq = sellQuantity, buyPrice > 0 else { return 0 }
+        let costWithFee = buyPrice * sq + fees.buyCommission(price: buyPrice, quantity: sq)
+        guard costWithFee > 0 else { return 0 }
+        let netProceeds = sp * sq
+            - fees.sellCommission(price: sp, quantity: sq)
+            - fees.transactionTax(sellPrice: sp, quantity: sq)
+        return (netProceeds - costWithFee) / costWithFee * 100
     }
 
     /// 目前狀態描述
@@ -231,7 +241,7 @@ final class Investment {
         let sellDateStr = sellDate.map { df.string(from: $0) } ?? ""
         let sellPriceStr = sellPrice.map { String(format: "%.2f", $0) } ?? ""
         let sellQtyStr = sellQuantity.map { String(format: "%.0f", $0) } ?? ""
-        let plStr = isClosed ? String(format: "%.0f", realizedProfitLoss) : ""
+        let plStr = isClosed ? String(format: "%.0f", realizedProfitLoss()) : ""
 
         // 將理由中的逗號與換行替換，避免破壞 CSV 格式
         func escape(_ s: String) -> String {
@@ -459,15 +469,20 @@ struct PortfolioGroup: Identifiable {
         return Investment.tradingDaysBetween(from: earliest, to: Date())
     }
 
-    /// 計算群組未實現損益
-    func unrealizedProfitLoss(currentPrice: Double) -> Double {
-        return (currentPrice - weightedAverageCost) * totalQuantity
+    /// 計算群組未實現損益（扣除手續費與交易稅）
+    func unrealizedProfitLoss(currentPrice: Double, fees: TradingFeeSettings = .defaults) -> Double {
+        let gross = (currentPrice - weightedAverageCost) * totalQuantity
+        return gross - fees.totalFees(buyPrice: weightedAverageCost, sellPrice: currentPrice, quantity: totalQuantity)
     }
 
-    /// 計算群組報酬率
-    func returnPercentage(currentPrice: Double) -> Double {
-        guard weightedAverageCost > 0 else { return 0 }
-        return (currentPrice - weightedAverageCost) / weightedAverageCost * 100
+    /// 計算群組報酬率（扣除手續費與交易稅）
+    func returnPercentage(currentPrice: Double, fees: TradingFeeSettings = .defaults) -> Double {
+        let costWithFee = weightedAverageCost * totalQuantity + fees.buyCommission(price: weightedAverageCost, quantity: totalQuantity)
+        guard costWithFee > 0 else { return 0 }
+        let netProceeds = currentPrice * totalQuantity
+            - fees.sellCommission(price: currentPrice, quantity: totalQuantity)
+            - fees.transactionTax(sellPrice: currentPrice, quantity: totalQuantity)
+        return (netProceeds - costWithFee) / costWithFee * 100
     }
 
     /// 整批賣出（FIFO）

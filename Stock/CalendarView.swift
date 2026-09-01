@@ -311,7 +311,7 @@ struct CalendarView: View {
                         .font(.warmSubheadline())
                         .foregroundStyle(AppColor.softDown)
                 }
-                let pl = investment.realizedProfitLoss
+                let pl = investment.realizedProfitLoss()
                 Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f")")
                     .font(.warmCaption())
                     .fontWeight(.semibold)

@@ -359,6 +359,15 @@ struct GroupSellView: View {
                         .font(.warmSubheadline())
                         .foregroundStyle(AppColor.textMain)
                 }
+                HStack {
+                    Text("交易成本（手續費+稅）")
+                        .font(.warmCaption())
+                        .foregroundStyle(AppColor.textSecondary)
+                    Spacer()
+                    Text(String(format: "$%.0f", preview.totalFees))
+                        .font(.warmSubheadline())
+                        .foregroundStyle(AppColor.softDown)
+                }
 
                 AppColor.divider.frame(height: 1)
 

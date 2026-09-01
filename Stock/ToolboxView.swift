@@ -41,6 +41,14 @@ struct ToolboxView: View {
                         )
 
                         toolCard(
+                            title: "參數設定",
+                            subtitle: "交易費用、均線、RSI、KDJ、MACD、布林通道等參數",
+                            icon: "slider.horizontal.3",
+                            iconColor: AppColor.primary,
+                            destination: TechnicalSettingsView()
+                        )
+
+                        toolCard(
                             title: "資料備份",
                             subtitle: "匯出或匯入投資紀錄備份檔案",
                             icon: "externaldrive.fill",

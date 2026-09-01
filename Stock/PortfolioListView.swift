@@ -222,86 +222,91 @@ struct PortfolioListView: View {
                     vm.toggleExpanded(group.ticker)
                 }
             } label: {
-                HStack(spacing: 12) {
-                    // 左：中文名稱（主）+ 代號（副）+ 技術信號
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(vm.displayName(for: group.ticker))
-                            .font(.warmHeadline())
-                            .foregroundStyle(AppColor.primary)
-                        HStack(spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 12) {
+                        // 左：中文名稱（主）+ 代號（副）
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(vm.displayName(for: group.ticker))
+                                .font(.warmHeadline())
+                                .foregroundStyle(AppColor.primary)
                             Text(group.ticker)
                                 .font(.warmCaption2())
                                 .foregroundStyle(AppColor.textSecondary)
-                            if let signal = vm.technicalSignals[group.ticker] {
-                                compactSignalBadges(signal, ticker: group.ticker)
-                            }
                         }
-                    }
-                    .frame(minWidth: 60, alignment: .leading)
+                        .frame(minWidth: 60, alignment: .leading)
 
-                    // 中：股數 + 均價
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(String(format: "%.0f 股", group.totalQuantity))
-                            .font(.warmCaption())
-                            .foregroundStyle(AppColor.textMain)
-                        Text(String(format: "均價 $%.2f", group.weightedAverageCost))
-                            .font(.warmCaption2())
-                            .foregroundStyle(AppColor.textSecondary)
-                    }
-
-                    Spacer()
-
-                    // 個股分析按鈕
-                    Button {
-                        vm.openStockDetail(group)
-                    } label: {
-                        Image(systemName: "chart.xyaxis.line")
-                            .font(.system(size: 14))
-                            .foregroundStyle(AppColor.primary)
-                            .frame(width: 28, height: 28)
-                            .background(AppColor.primary.opacity(0.1))
-                            .clipShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-
-                    // 右：即時價 + 漲跌 + 損益
-                    if let price = currentPrice {
-                        let pl = group.unrealizedProfitLoss(currentPrice: price)
-                        let pct = group.returnPercentage(currentPrice: price)
-                        let change = vm.dailyChangePoints[group.ticker]
-                        let changePct = vm.dailyChangePercents[group.ticker]
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(String(format: "$%.2f", price))
+                        // 中：股數 + 均價
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(String(format: "%.0f 股", group.totalQuantity))
                                 .font(.warmCaption())
-                                .fontWeight(.semibold)
                                 .foregroundStyle(AppColor.textMain)
-                            // 當日漲跌
-                            if let change, let changePct {
-                                Text("\(change >= 0 ? "▲" : "▼")\(abs(change), specifier: "%.2f") (\(changePct >= 0 ? "+" : "")\(changePct, specifier: "%.2f")%)")
+                            Text(String(format: "均價 $%.2f", group.weightedAverageCost))
+                                .font(.warmCaption2())
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+
+                        Spacer()
+
+                        // 個股分析按鈕
+                        Button {
+                            vm.openStockDetail(group)
+                        } label: {
+                            Image(systemName: "chart.xyaxis.line")
+                                .font(.system(size: 14))
+                                .foregroundStyle(AppColor.primary)
+                                .frame(width: 28, height: 28)
+                                .background(AppColor.primary.opacity(0.1))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+
+                        // 右：即時價 + 漲跌 + 損益
+                        if let price = currentPrice {
+                            let fees = TradingFeeSettings.load()
+                            let pl = group.unrealizedProfitLoss(currentPrice: price, fees: fees)
+                            let pct = group.returnPercentage(currentPrice: price, fees: fees)
+                            let change = vm.dailyChangePoints[group.ticker]
+                            let changePct = vm.dailyChangePercents[group.ticker]
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(String(format: "$%.2f", price))
+                                    .font(.warmCaption())
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(AppColor.textMain)
+                                // 當日漲跌
+                                if let change, let changePct {
+                                    Text("\(change >= 0 ? "▲" : "▼")\(abs(change), specifier: "%.2f") (\(changePct >= 0 ? "+" : "")\(changePct, specifier: "%.2f")%)")
+                                        .font(.warmCaption2())
+                                        .foregroundStyle(Color.profitLossColor(change))
+                                }
+                                Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f") (\(pct >= 0 ? "+" : "")\(pct, specifier: "%.1f")%)")
                                     .font(.warmCaption2())
-                                    .foregroundStyle(Color.profitLossColor(change))
+                                    .foregroundStyle(Color.profitLossColor(pl))
                             }
-                            Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f") (\(pct >= 0 ? "+" : "")\(pct, specifier: "%.1f")%)")
-                                .font(.warmCaption2())
-                                .foregroundStyle(Color.profitLossColor(pl))
+                        } else {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(String(format: "$%.0f", group.totalInvested))
+                                    .font(.warmCaption())
+                                    .fontWeight(.medium)
+                                    .foregroundStyle(AppColor.textMain)
+                                Text("無即時價")
+                                    .font(.warmCaption2())
+                                    .foregroundStyle(AppColor.textSecondary.opacity(0.6))
+                            }
                         }
-                    } else {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(String(format: "$%.0f", group.totalInvested))
-                                .font(.warmCaption())
-                                .fontWeight(.medium)
-                                .foregroundStyle(AppColor.textMain)
-                            Text("無即時價")
-                                .font(.warmCaption2())
-                                .foregroundStyle(AppColor.textSecondary.opacity(0.6))
-                        }
+
+                        // 展開指示箭頭
+                        Image(systemName: "chevron.right")
+                            .font(.warmCaption2())
+                            .foregroundStyle(AppColor.textSecondary.opacity(0.5))
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     }
 
-                    // 展開指示箭頭
-                    Image(systemName: "chevron.right")
-                        .font(.warmCaption2())
-                        .foregroundStyle(AppColor.textSecondary.opacity(0.5))
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    // 技術信號標籤列（獨立一行，自動換行）
+                    if let signal = vm.technicalSignals[group.ticker] {
+                        FlowLayout(spacing: 4) {
+                            compactSignalBadges(signal, ticker: group.ticker)
+                        }
+                    }
                 }
                 .padding(14)
                 .contentShape(Rectangle())
@@ -316,8 +321,9 @@ struct PortfolioListView: View {
 
                     // 即時價格 & 損益區塊
                     if let price = currentPrice {
-                        let pl = group.unrealizedProfitLoss(currentPrice: price)
-                        let pct = group.returnPercentage(currentPrice: price)
+                        let fees = TradingFeeSettings.load()
+                        let pl = group.unrealizedProfitLoss(currentPrice: price, fees: fees)
+                        let pct = group.returnPercentage(currentPrice: price, fees: fees)
                         let marketValue = price * group.totalQuantity
 
                         VStack(spacing: 8) {
@@ -523,8 +529,9 @@ struct PortfolioListView: View {
                 // 右側：單筆損益 + 賣出按鈕
                 VStack(alignment: .trailing, spacing: 4) {
                     if let price = currentPrice {
-                        let pl = investment.unrealizedProfitLoss(currentPrice: price)
-                        let pct = investment.returnPercentage(currentPrice: price)
+                        let fees = TradingFeeSettings.load()
+                        let pl = investment.unrealizedProfitLoss(currentPrice: price, fees: fees)
+                        let pct = investment.returnPercentage(currentPrice: price, fees: fees)
                         Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f")")
                             .font(.warmCaption2())
                             .fontWeight(.semibold)
@@ -555,15 +562,32 @@ struct PortfolioListView: View {
 
     // MARK: - 技術指標信號顯示
 
-    /// 摺疊狀態下的精簡信號徽章
+    /// 摺疊狀態下的精簡信號徽章（僅顯示重要觸發信號）
     @ViewBuilder
     private func compactSignalBadges(_ signal: TechnicalIndicators.SignalSummary, ticker: String) -> some View {
-        // 只顯示重要信號：超買超賣 或 KD 交叉
+        // 均線交叉
+        if let maCross = signal.maCross {
+            signalPill(maCross.label, color: maCross == .goldenCross ? AppColor.secondary : AppColor.softDown)
+        }
+        // MACD 交叉
+        if let macdSig = signal.macdSignal, let label = macdSig.label {
+            signalPill(label, color: macdSig == .goldenCross ? AppColor.secondary : AppColor.softDown)
+        }
+        // 超買超賣
         if let rsiSig = signal.rsiSignal, let label = rsiSig.label {
             signalPill(label, color: rsiSig == .overbought ? AppColor.softUp : AppColor.softDown)
         }
+        // KD 交叉
         if let kdjSig = signal.kdjSignal, let label = kdjSig.label {
             signalPill(label, color: kdjSig == .goldenCross ? AppColor.secondary : AppColor.softDown)
+        }
+        // 布林通道
+        if let bbSig = signal.bollingerSignal, let label = bbSig.label {
+            signalPill(label, color: bbSig == .nearLower ? AppColor.softDown : (bbSig == .nearUpper ? AppColor.softUp : AppColor.primary))
+        }
+        // 量能異動
+        if let volSig = signal.volumeSignal, let label = volSig.label {
+            signalPill(label, color: volSig == .surge ? AppColor.softUp : (volSig == .shrink ? AppColor.textSecondary : AppColor.secondary))
         }
         // 52 週位置警示
         if let stats = vm.weekStats[ticker],
@@ -765,6 +789,53 @@ struct PortfolioListView: View {
             .background(filled ? color : color.opacity(0.12))
             .foregroundStyle(filled ? .white : color)
             .clipShape(Capsule())
+    }
+}
+
+// MARK: - Flow Layout（自動換行佈局）
+
+/// 水平排列子視圖，空間不足時自動換行
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentX + size.width > maxWidth && currentX > 0 {
+                currentX = 0
+                currentY += lineHeight + spacing
+                lineHeight = 0
+            }
+            lineHeight = max(lineHeight, size.height)
+            currentX += size.width + spacing
+            totalHeight = currentY + lineHeight
+        }
+
+        return CGSize(width: maxWidth, height: totalHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var currentX: CGFloat = bounds.minX
+        var currentY: CGFloat = bounds.minY
+        var lineHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentX + size.width > bounds.maxX && currentX > bounds.minX {
+                currentX = bounds.minX
+                currentY += lineHeight + spacing
+                lineHeight = 0
+            }
+            subview.place(at: CGPoint(x: currentX, y: currentY), proposal: .unspecified)
+            lineHeight = max(lineHeight, size.height)
+            currentX += size.width + spacing
+        }
     }
 }
 

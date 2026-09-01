@@ -179,9 +179,10 @@ final class KLineChartViewModel {
     // MARK: - Indicator Computation
 
     private func computeIndicators() {
+        let settings = TechnicalSettings.load()
         let closes = candles.map(\.close)
-        ma5 = TechnicalIndicators.sma(closes: closes, period: 5)
-        ma20 = TechnicalIndicators.sma(closes: closes, period: 20)
+        ma5 = TechnicalIndicators.sma(closes: closes, period: settings.maShortPeriod)
+        ma20 = TechnicalIndicators.sma(closes: closes, period: settings.maLongPeriod)
         volumeMax = candles.map(\.volume).max() ?? 0
     }
 }

@@ -8,6 +8,7 @@ struct ProfitPreview {
     let costTotal: Double
     let profitLoss: Double
     let returnPct: Double
+    let totalFees: Double
 }
 
 @Observable
@@ -53,15 +54,19 @@ final class SellViewModel {
         guard let sellPrice = Double(sellPriceText),
               let sellQty = Double(sellQuantityText),
               sellPrice > 0, sellQty > 0 else { return nil }
-        let profitLoss = (sellPrice - investment.buyPrice) * sellQty
-        let returnPct = investment.buyPrice > 0
-            ? (sellPrice - investment.buyPrice) / investment.buyPrice * 100
+        let fees = TradingFeeSettings.load()
+        let feesTotal = fees.totalFees(buyPrice: investment.buyPrice, sellPrice: sellPrice, quantity: sellQty)
+        let profitLoss = fees.netProfitLoss(buyPrice: investment.buyPrice, sellPrice: sellPrice, quantity: sellQty)
+        let costWithFee = investment.buyPrice * sellQty + fees.buyCommission(price: investment.buyPrice, quantity: sellQty)
+        let returnPct = costWithFee > 0
+            ? profitLoss / costWithFee * 100
             : 0
         return ProfitPreview(
             sellTotal: sellPrice * sellQty,
             costTotal: investment.buyPrice * sellQty,
             profitLoss: profitLoss,
-            returnPct: returnPct
+            returnPct: returnPct,
+            totalFees: feesTotal
         )
     }
 
