@@ -343,6 +343,104 @@ actor StockService {
         }
         return results
     }
+
+    // MARK: - TWSE 三大法人買賣超
+
+    /// 單日法人買賣超
+    struct InstitutionalDayData: Sendable {
+        let date: String
+        let foreignNet: Int      // 外資買賣超（張）
+        let trustNet: Int        // 投信買賣超（張）
+        let dealerNet: Int       // 自營商買賣超（張）
+        let totalNet: Int        // 三大法人合計（張）
+    }
+
+    /// 某檔股票的法人統計摘要
+    struct InstitutionalSummary: Sendable {
+        let days: [InstitutionalDayData]   // 最近 N 日（新→舊）
+
+        var latestForeignNet: Int { days.first?.foreignNet ?? 0 }
+        var latestTrustNet: Int { days.first?.trustNet ?? 0 }
+        var latestDealerNet: Int { days.first?.dealerNet ?? 0 }
+        var latestTotalNet: Int { days.first?.totalNet ?? 0 }
+        var latestDate: String { days.first?.date ?? "" }
+
+        /// 連續天數（正=連續買超，負=連續賣超，0=無資料或方向不一致）
+        var foreignStreak: Int { Self.streak(days.map(\.foreignNet)) }
+        var trustStreak: Int { Self.streak(days.map(\.trustNet)) }
+        var totalStreak: Int { Self.streak(days.map(\.totalNet)) }
+
+        private static func streak(_ values: [Int]) -> Int {
+            guard let first = values.first, first != 0 else { return 0 }
+            let positive = first > 0
+            var count = 0
+            for v in values {
+                if (positive && v > 0) || (!positive && v < 0) {
+                    count += 1
+                } else {
+                    break
+                }
+            }
+            return positive ? count : -count
+        }
+    }
+
+    /// TWSE 三大法人買賣超 API 回應
+    private struct TWSEInstitutionalResponse: Decodable {
+        let stat: String?
+        let data: [[String]]?
+    }
+
+    /// 取得單日全部個股的三大法人買賣超
+    /// - Parameter date: 日期格式 "yyyyMMdd"
+    /// - Returns: [證券代號: InstitutionalDayData]
+    func fetchInstitutionalData(date: String) async throws -> [String: InstitutionalDayData] {
+        let urlString = "https://www.twse.com.tw/rwd/zh/fund/T86?date=\(date)&selectType=ALL&response=json"
+        guard let url = URL(string: urlString) else {
+            throw StockServiceError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw StockServiceError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw StockServiceError.httpError(http.statusCode)
+        }
+
+        let decoded = try JSONDecoder().decode(TWSEInstitutionalResponse.self, from: data)
+        guard decoded.stat == "OK", let rows = decoded.data, !rows.isEmpty else {
+            throw StockServiceError.noData
+        }
+
+        var result: [String: InstitutionalDayData] = [:]
+        for row in rows where row.count >= 19 {
+            let code = row[0].trimmingCharacters(in: .whitespaces)
+            let foreignNet = Self.parseShares(row[4])
+            let trustNet = Self.parseShares(row[10])
+            let dealerNet = Self.parseShares(row[11])
+            let totalNet = Self.parseShares(row[18])
+
+            result[code] = InstitutionalDayData(
+                date: date,
+                foreignNet: foreignNet,
+                trustNet: trustNet,
+                dealerNet: dealerNet,
+                totalNet: totalNet
+            )
+        }
+        return result
+    }
+
+    /// 解析帶逗號的股數字串，轉為張數（除以 1000）
+    private static func parseShares(_ str: String) -> Int {
+        let cleaned = str.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
+        let shares = Int(cleaned) ?? 0
+        return shares / 1000
+    }
 }
 
 // MARK: - Errors

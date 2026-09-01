@@ -14,6 +14,7 @@ struct StockDetailSheetView: View {
     let currentPrice: Double?
     let displayName: String
     let highSinceBuy: Double?
+    let institutionalData: StockService.InstitutionalSummary?
 
     @Environment(\.dismiss) private var dismiss
     @State private var chartVM: KLineChartViewModel
@@ -24,7 +25,8 @@ struct StockDetailSheetView: View {
         weekStats: PortfolioListViewModel.WeekStats?,
         currentPrice: Double?,
         displayName: String,
-        highSinceBuy: Double? = nil
+        highSinceBuy: Double? = nil,
+        institutionalData: StockService.InstitutionalSummary? = nil
     ) {
         self.group = group
         self.signal = signal
@@ -32,6 +34,7 @@ struct StockDetailSheetView: View {
         self.currentPrice = currentPrice
         self.displayName = displayName
         self.highSinceBuy = highSinceBuy
+        self.institutionalData = institutionalData
         self._chartVM = State(initialValue: KLineChartViewModel(group: group))
     }
 
@@ -53,6 +56,11 @@ struct StockDetailSheetView: View {
                         // 移動停利建議
                         if let price = currentPrice, let high = highSinceBuy, high > 0 {
                             trailingStopSection(currentPrice: price, highSinceBuy: high)
+                        }
+
+                        // 法人買賣超
+                        if let inst = institutionalData {
+                            institutionalSection(inst)
                         }
 
                         // 52 週區間
@@ -436,6 +444,115 @@ struct StockDetailSheetView: View {
         .background(AppColor.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
+
+    // MARK: - 法人買賣超
+
+    private func institutionalSection(_ data: StockService.InstitutionalSummary) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 4) {
+                Image(systemName: "building.2")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("三大法人買賣超（張）")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            // 連續天數摘要
+            HStack(spacing: 12) {
+                streakBadge(label: "外資", streak: data.foreignStreak)
+                streakBadge(label: "投信", streak: data.trustStreak)
+                streakBadge(label: "合計", streak: data.totalStreak)
+                Spacer()
+            }
+
+            // 最近 N 日表格
+            VStack(spacing: 0) {
+                // 表頭
+                HStack(spacing: 0) {
+                    Text("日期")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("外資")
+                        .frame(maxWidth: .infinity)
+                    Text("投信")
+                        .frame(maxWidth: .infinity)
+                    Text("自營")
+                        .frame(maxWidth: .infinity)
+                    Text("合計")
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .foregroundStyle(AppColor.textSecondary)
+                .padding(.vertical, 4)
+
+                AppColor.divider.frame(height: 1)
+
+                // 資料列
+                ForEach(Array(data.days.enumerated()), id: \.offset) { _, day in
+                    HStack(spacing: 0) {
+                        Text(formatShortDate(day.date))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundStyle(AppColor.textSecondary)
+                        netText(day.foreignNet)
+                            .frame(maxWidth: .infinity)
+                        netText(day.trustNet)
+                            .frame(maxWidth: .infinity)
+                        netText(day.dealerNet)
+                            .frame(maxWidth: .infinity)
+                        netText(day.totalNet)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .padding(.vertical, 3)
+                }
+            }
+            .padding(8)
+            .background(AppColor.background.opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .padding(12)
+        .background(AppColor.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
+
+    private func streakBadge(label: String, streak: Int) -> some View {
+        HStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(AppColor.textSecondary)
+            if abs(streak) >= 2 {
+                Text("連\(streak > 0 ? "買" : "賣")\(abs(streak))日")
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background((streak > 0 ? AppColor.secondary : AppColor.softDown).opacity(0.15))
+                    .foregroundStyle(streak > 0 ? AppColor.secondary : AppColor.softDown)
+                    .clipShape(Capsule())
+            } else if streak != 0 {
+                Text(streak > 0 ? "買超" : "賣超")
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(streak > 0 ? AppColor.secondary : AppColor.softDown)
+            } else {
+                Text("—")
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppColor.textSecondary.opacity(0.5))
+            }
+        }
+    }
+
+    private func netText(_ value: Int) -> Text {
+        Text("\(value >= 0 ? "+" : "")\(value)")
+            .foregroundColor(Color.profitLossColor(Double(value)))
+    }
+
+    private func formatShortDate(_ dateStr: String) -> String {
+        // "yyyyMMdd" → "MM/dd"
+        guard dateStr.count == 8 else { return dateStr }
+        let mm = dateStr[dateStr.index(dateStr.startIndex, offsetBy: 4)..<dateStr.index(dateStr.startIndex, offsetBy: 6)]
+        let dd = dateStr[dateStr.index(dateStr.startIndex, offsetBy: 6)..<dateStr.endIndex]
+        return "\(mm)/\(dd)"
     }
 
     // MARK: - 52 週區間

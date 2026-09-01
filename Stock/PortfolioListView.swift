@@ -52,7 +52,8 @@ struct PortfolioListView: View {
                         weekStats: vm.weekStats[group.ticker],
                         currentPrice: vm.currentPrice(for: group.ticker),
                         displayName: vm.displayName(for: group.ticker),
-                        highSinceBuy: vm.highSinceBuy[group.ticker]
+                        highSinceBuy: vm.highSinceBuy[group.ticker],
+                        institutionalData: vm.institutionalData[group.ticker]
                     )
                 }
             }
@@ -71,6 +72,7 @@ struct PortfolioListView: View {
                 vm.fetchAllPrices()
                 vm.fetchTechnicalSignals()
                 vm.fetchWeekStats()
+                vm.fetchInstitutionalData()
             }
             .onChange(of: investments) { _, newValue in
                 vm.investments = newValue
@@ -129,13 +131,14 @@ struct PortfolioListView: View {
                     .font(.warmHeadline())
                     .foregroundStyle(AppColor.textMain)
                 Spacer()
-                // 重新整理即時價 + 技術指標 + 52週統計
+                // 重新整理即時價 + 技術指標 + 52週統計 + 法人
                 Button {
                     vm.fetchAllPrices()
                     vm.fetchTechnicalSignals()
                     vm.fetchWeekStats()
+                    vm.fetchInstitutionalData()
                 } label: {
-                    if vm.isFetchingPrices || vm.isFetchingSignals || vm.isFetchingWeekStats {
+                    if vm.isFetchingPrices || vm.isFetchingSignals || vm.isFetchingWeekStats || vm.isFetchingInstitutional {
                         ProgressView()
                             .scaleEffect(0.7)
                     } else {
@@ -144,7 +147,7 @@ struct PortfolioListView: View {
                             .foregroundStyle(AppColor.primary)
                     }
                 }
-                .disabled(vm.isFetchingPrices || vm.isFetchingSignals || vm.isFetchingWeekStats)
+                .disabled(vm.isFetchingPrices || vm.isFetchingSignals || vm.isFetchingWeekStats || vm.isFetchingInstitutional)
             }
 
             AppColor.divider.frame(height: 1)
@@ -416,6 +419,12 @@ struct PortfolioListView: View {
                         .padding(.horizontal, 14)
                     }
 
+                    // 法人買賣超摘要
+                    if let inst = vm.institutionalData[group.ticker] {
+                        institutionalBanner(inst)
+                            .padding(.horizontal, 14)
+                    }
+
                     // 資訊徽章列
                     HStack {
                         WarmInfoBadge(title: "均價", value: String(format: "$%.2f", group.weightedAverageCost))
@@ -604,6 +613,19 @@ struct PortfolioListView: View {
                 signalPill("近52W低", color: AppColor.softDown)
             }
         }
+        // 法人買賣超連續天數
+        if let inst = vm.institutionalData[ticker] {
+            let fs = inst.foreignStreak
+            if abs(fs) >= 2 {
+                signalPill("外資連\(fs > 0 ? "買" : "賣")\(abs(fs))日",
+                           color: fs > 0 ? AppColor.secondary : AppColor.softDown)
+            }
+            let ts = inst.trustStreak
+            if abs(ts) >= 2 {
+                signalPill("投信連\(ts > 0 ? "買" : "賣")\(abs(ts))日",
+                           color: ts > 0 ? AppColor.secondary : AppColor.softDown)
+            }
+        }
     }
 
     /// 展開狀態下的完整技術指標信號
@@ -782,6 +804,51 @@ struct PortfolioListView: View {
             }
             .frame(height: 8)
         }
+    }
+
+    // MARK: - 法人買賣超摘要
+
+    private func institutionalBanner(_ data: StockService.InstitutionalSummary) -> some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: "building.2")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text(String(format: "法人動態（%@）", String(data.latestDate.suffix(4).prefix(2) + "/" + data.latestDate.suffix(2))))
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+                if vm.isFetchingInstitutional {
+                    ProgressView().scaleEffect(0.5)
+                }
+            }
+            HStack(spacing: 0) {
+                institutionalCell(label: "外資", value: data.latestForeignNet, streak: data.foreignStreak)
+                institutionalCell(label: "投信", value: data.latestTrustNet, streak: data.trustStreak)
+                institutionalCell(label: "自營", value: data.latestDealerNet, streak: nil)
+                institutionalCell(label: "合計", value: data.latestTotalNet, streak: data.totalStreak)
+            }
+        }
+        .padding(10)
+        .background(AppColor.background.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func institutionalCell(label: String, value: Int, streak: Int?) -> some View {
+        VStack(spacing: 2) {
+            Text(label)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(AppColor.textSecondary)
+            Text("\(value >= 0 ? "+" : "")\(value)")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.profitLossColor(Double(value)))
+            if let streak, abs(streak) >= 2 {
+                Text("連\(streak > 0 ? "買" : "賣")\(abs(streak))日")
+                    .font(.system(size: 8, weight: .medium, design: .rounded))
+                    .foregroundStyle(streak > 0 ? AppColor.secondary : AppColor.softDown)
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 移動停利建議橫幅

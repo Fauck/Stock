@@ -33,6 +33,10 @@ final class PortfolioListViewModel {
     /// 買入後最高價 [ticker: highestPrice]（用於移動停利）
     var highSinceBuy: [String: Double] = [:]
 
+    /// 三大法人買賣超 [ticker: InstitutionalSummary]
+    var institutionalData: [String: StockService.InstitutionalSummary] = [:]
+    var isFetchingInstitutional: Bool = false
+
     /// API 查到的中文名稱快取 [symbol: name]
     var stockNames: [String: String] = [:]
 
@@ -58,6 +62,7 @@ final class PortfolioListViewModel {
     private var fetchTask: Task<Void, Never>?
     private var signalTask: Task<Void, Never>?
     private var weekStatsTask: Task<Void, Never>?
+    private var institutionalTask: Task<Void, Never>?
 
     // MARK: - Computed
 
@@ -376,6 +381,83 @@ final class PortfolioListViewModel {
 
             guard !Task.isCancelled else { return }
             isFetchingWeekStats = false
+        }
+    }
+
+    // MARK: - 三大法人買賣超載入
+
+    /// 批次載入持有標的的三大法人買賣超（最近 5 個交易日）
+    func fetchInstitutionalData() {
+        let tickers = groups.map(\.ticker)
+        guard !tickers.isEmpty else { return }
+
+        institutionalTask?.cancel()
+        institutionalTask = Task { @MainActor in
+            isFetchingInstitutional = true
+
+            // 取得持有標的的股票代號（純數字代號，用於 TWSE 查詢）
+            var tickerToCode: [String: String] = [:]
+            for ticker in tickers {
+                let resolved = StockMapping.resolve(ticker)
+                tickerToCode[ticker] = resolved.symbol
+            }
+
+            // 產生最近 14 個日曆日（倒序），確保涵蓋至少 5 個交易日（含長假）
+            let calendar = Calendar.current
+            let today = Date()
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyyMMdd"
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+
+            var datesToFetch: [String] = []
+            for i in 0..<14 {
+                if let d = calendar.date(byAdding: .day, value: -i, to: today) {
+                    datesToFetch.append(formatter.string(from: d))
+                }
+            }
+
+            // 並行呼叫多日 TWSE API
+            let allDayResults = await withTaskGroup(
+                of: (String, [String: StockService.InstitutionalDayData]?).self
+            ) { group in
+                for dateStr in datesToFetch {
+                    group.addTask {
+                        do {
+                            let data = try await StockService.shared.fetchInstitutionalData(date: dateStr)
+                            return (dateStr, data)
+                        } catch {
+                            return (dateStr, nil)
+                        }
+                    }
+                }
+                var collected: [(String, [String: StockService.InstitutionalDayData])] = []
+                for await (dateStr, data) in group {
+                    if let data { collected.append((dateStr, data)) }
+                }
+                // 按日期倒序（新→舊）
+                return collected.sorted { $0.0 > $1.0 }
+            }
+
+            guard !Task.isCancelled else { return }
+
+            // 取最多 5 個有效交易日
+            let tradingDays = Array(allDayResults.prefix(5))
+
+            // 針對每個持有 ticker 組裝 InstitutionalSummary
+            for (ticker, code) in tickerToCode {
+                var days: [StockService.InstitutionalDayData] = []
+                for (_, dayMap) in tradingDays {
+                    if let dayData = dayMap[code] {
+                        days.append(dayData)
+                    }
+                }
+                if !days.isEmpty {
+                    institutionalData[ticker] = StockService.InstitutionalSummary(days: days)
+                }
+            }
+
+            guard !Task.isCancelled else { return }
+            isFetchingInstitutional = false
         }
     }
 
