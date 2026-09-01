@@ -71,6 +71,12 @@ struct TechnicalSettingsView: View {
                 step: 0.0001,
                 onSave: { feeSettings.save() }
             )
+            Divider()
+            trailingStopRow(
+                label: "回撤停利",
+                value: $feeSettings.trailingStopPct,
+                range: 5...30
+            )
         }
     }
 
@@ -96,6 +102,28 @@ struct TechnicalSettingsView: View {
             Slider(value: value, in: range, step: step)
                 .tint(AppColor.primary)
                 .onChange(of: value.wrappedValue) { onSave() }
+        }
+    }
+
+    /// 移動停利門檻 Stepper（整數百分比）
+    private func trailingStopRow(
+        label: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>
+    ) -> some View {
+        HStack {
+            Text(label)
+                .font(.warmBody())
+                .foregroundStyle(AppColor.textMain)
+            Spacer()
+            Text(String(format: "%.0f%%", value.wrappedValue))
+                .font(.warmBody())
+                .fontWeight(.medium)
+                .foregroundStyle(AppColor.primary)
+                .frame(minWidth: 40, alignment: .trailing)
+            Stepper("", value: value, in: range, step: 5)
+                .labelsHidden()
+                .onChange(of: value.wrappedValue) { feeSettings.save() }
         }
     }
 

@@ -14,7 +14,7 @@ struct AddInvestmentView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var vm: AddInvestmentViewModel
-    @FocusState private var isReasonFocused: Bool
+
 
     init(selectedDate: Date) {
         _vm = State(initialValue: AddInvestmentViewModel(selectedDate: selectedDate))
@@ -37,10 +37,6 @@ struct AddInvestmentView: View {
                             // MARK: - 大盤狀態
                             marketConditionCard
 
-                            // MARK: - 買入理由
-                            reasonCard
-                                .id("reasonCard")
-
                             // MARK: - 交易日誌（進場前 + 執行中）
                             journalCard
                                 .id("journalCard")
@@ -51,11 +47,6 @@ struct AddInvestmentView: View {
                         .padding(16)
                     }
                     .keyboardDismissable()
-                    .onChange(of: isReasonFocused) { _, focused in
-                        if focused {
-                            withAnimation { proxy.scrollTo("reasonCard", anchor: .bottom) }
-                        }
-                    }
                 }
             }
             .navigationTitle("新增買入紀錄")
@@ -80,6 +71,9 @@ struct AddInvestmentView: View {
                 Button("確定", role: .cancel) {}
             } message: {
                 Text(vm.alertMessage)
+            }
+            .onAppear {
+                vm.autoDetectMarket()
             }
         }
     }
@@ -216,22 +210,6 @@ struct AddInvestmentView: View {
     private var marketConditionCard: some View {
         MarketConditionPicker(selection: $vm.buyMarketCondition)
             .cardStyle()
-    }
-
-    // MARK: - 買入理由卡片
-
-    private var reasonCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            NotebookTextField(
-                placeholder: "記錄你的買入原因...",
-                text: $vm.buyReason,
-                lineLimit: 4,
-                icon: "pencil.line",
-                iconColor: AppColor.primary,
-                isFocused: $isReasonFocused
-            )
-        }
-        .cardStyle()
     }
 
     // MARK: - 交易日誌卡片

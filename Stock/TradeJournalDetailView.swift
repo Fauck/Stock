@@ -158,8 +158,8 @@ struct TradeJournalDetailView: View {
                 }
             }
 
-            // 原始買入理由
-            if !investment.buyReason.isEmpty {
+            // 買入理由（僅在沒有 journal setup 時顯示，避免重複）
+            if !investment.buyReason.isEmpty && journal.setup.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("買入理由")
                         .font(.warmCaption())

@@ -13,6 +13,7 @@ struct StockDetailSheetView: View {
     let weekStats: PortfolioListViewModel.WeekStats?
     let currentPrice: Double?
     let displayName: String
+    let highSinceBuy: Double?
 
     @Environment(\.dismiss) private var dismiss
     @State private var chartVM: KLineChartViewModel
@@ -22,13 +23,15 @@ struct StockDetailSheetView: View {
         signal: TechnicalIndicators.SignalSummary?,
         weekStats: PortfolioListViewModel.WeekStats?,
         currentPrice: Double?,
-        displayName: String
+        displayName: String,
+        highSinceBuy: Double? = nil
     ) {
         self.group = group
         self.signal = signal
         self.weekStats = weekStats
         self.currentPrice = currentPrice
         self.displayName = displayName
+        self.highSinceBuy = highSinceBuy
         self._chartVM = State(initialValue: KLineChartViewModel(group: group))
     }
 
@@ -45,6 +48,11 @@ struct StockDetailSheetView: View {
                         // 技術指標信號
                         if let signal {
                             technicalSignalSection(signal)
+                        }
+
+                        // 移動停利建議
+                        if let price = currentPrice, let high = highSinceBuy, high > 0 {
+                            trailingStopSection(currentPrice: price, highSinceBuy: high)
                         }
 
                         // 52 週區間
@@ -319,6 +327,115 @@ struct StockDetailSheetView: View {
         }
 
         return items
+    }
+
+    // MARK: - 移動停利建議
+
+    private func trailingStopSection(currentPrice: Double, highSinceBuy high: Double) -> some View {
+        let fees = TradingFeeSettings.load()
+        let pct = fees.trailingStopPct
+        let stopPrice = high * (1 - pct / 100)
+        let drawdownPct = (high - currentPrice) / high * 100
+        let marginPct = (currentPrice - stopPrice) / stopPrice * 100
+
+        // 狀態判斷
+        let breached = currentPrice <= stopPrice
+        let nearStop = !breached && currentPrice <= stopPrice * 1.03
+        let statusColor: Color = breached ? AppColor.softDown : (nearStop ? .orange : AppColor.secondary)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 4) {
+                Image(systemName: "shield.checkered")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text(String(format: "移動停利（回撤 %.0f%%）", pct))
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            // 數據列
+            HStack(spacing: 0) {
+                VStack(spacing: 2) {
+                    Text("最高價")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary)
+                    Text(String(format: "$%.1f", high))
+                        .font(.warmCaption())
+                        .fontWeight(.semibold)
+                        .foregroundStyle(AppColor.textMain)
+                }
+                .frame(maxWidth: .infinity)
+
+                VStack(spacing: 2) {
+                    Text("停利線")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary)
+                    Text(String(format: "$%.1f", stopPrice))
+                        .font(.warmCaption())
+                        .fontWeight(.semibold)
+                        .foregroundStyle(statusColor)
+                }
+                .frame(maxWidth: .infinity)
+
+                VStack(spacing: 2) {
+                    Text("現價")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary)
+                    Text(String(format: "$%.1f", currentPrice))
+                        .font(.warmCaption())
+                        .fontWeight(.semibold)
+                        .foregroundStyle(AppColor.textMain)
+                }
+                .frame(maxWidth: .infinity)
+
+                VStack(spacing: 2) {
+                    Text("回撤")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary)
+                    Text(String(format: "↓%.1f%%", drawdownPct))
+                        .font(.warmCaption())
+                        .fontWeight(.semibold)
+                        .foregroundStyle(statusColor)
+                }
+                .frame(maxWidth: .infinity)
+            }
+
+            // 狀態訊息
+            HStack(spacing: 6) {
+                if breached {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(AppColor.softDown)
+                    Text(String(format: "現價已跌破停利線，建議停利出場"))
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textMain)
+                } else if nearStop {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                    Text(String(format: "接近停利線（距 %.1f%%），密切留意", marginPct))
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textMain)
+                } else {
+                    Image(systemName: "checkmark.shield")
+                        .font(.system(size: 11))
+                        .foregroundStyle(AppColor.secondary)
+                    Text(String(format: "安全持有中，距停利線 %.1f%%", marginPct))
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textMain)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(statusColor.opacity(0.10))
+            )
+        }
+        .padding(12)
+        .background(AppColor.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 
     // MARK: - 52 週區間

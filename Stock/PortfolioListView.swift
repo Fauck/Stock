@@ -51,7 +51,8 @@ struct PortfolioListView: View {
                         signal: vm.technicalSignals[group.ticker],
                         weekStats: vm.weekStats[group.ticker],
                         currentPrice: vm.currentPrice(for: group.ticker),
-                        displayName: vm.displayName(for: group.ticker)
+                        displayName: vm.displayName(for: group.ticker),
+                        highSinceBuy: vm.highSinceBuy[group.ticker]
                     )
                 }
             }
@@ -405,6 +406,9 @@ struct PortfolioListView: View {
                                         .foregroundStyle(Color.profitLossColor(dailyChange))
                                 }
                             }
+
+                            // 移動停利建議
+                            trailingStopBanner(ticker: group.ticker, currentPrice: price)
                         }
                         .padding(10)
                         .background(Color.profitLossColor(pl).opacity(0.06))
@@ -778,6 +782,59 @@ struct PortfolioListView: View {
             }
             .frame(height: 8)
         }
+    }
+
+    // MARK: - 移動停利建議橫幅
+
+    @ViewBuilder
+    private func trailingStopBanner(ticker: String, currentPrice: Double) -> some View {
+        if let high = vm.highSinceBuy[ticker], high > 0 {
+            let pct = TradingFeeSettings.load().trailingStopPct
+            let stopPrice = high * (1 - pct / 100)
+            let drawdownPct = (high - currentPrice) / high * 100
+
+            AppColor.divider.frame(height: 1)
+
+            if currentPrice <= stopPrice {
+                // 已跌破停利線
+                trailingStopPill(
+                    icon: "exclamationmark.triangle.fill",
+                    color: AppColor.softDown,
+                    text: String(format: "已跌破停利線 $%.1f（最高 $%.1f ↓%.1f%%）", stopPrice, high, drawdownPct)
+                )
+            } else if currentPrice <= stopPrice * 1.03 {
+                // 接近停利線（3% 以內）
+                trailingStopPill(
+                    icon: "exclamationmark.circle.fill",
+                    color: .orange,
+                    text: String(format: "接近停利線 $%.1f（最高 $%.1f ↓%.1f%%）", stopPrice, high, drawdownPct)
+                )
+            } else {
+                // 安全持有
+                trailingStopPill(
+                    icon: "shield.checkered",
+                    color: AppColor.textSecondary,
+                    text: String(format: "停利參考 $%.1f（最高 $%.1f）", stopPrice, high)
+                )
+            }
+        }
+    }
+
+    private func trailingStopPill(icon: String, color: Color, text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.warmCaption2())
+                .foregroundStyle(color)
+            Text(text)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(AppColor.textMain)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(color.opacity(0.10))
+        )
     }
 
     /// 信號膠囊標籤

@@ -25,6 +25,14 @@ struct ToolboxView: View {
                         )
 
                         toolCard(
+                            title: "損益走勢圖",
+                            subtitle: "累計實現損益曲線與月度績效走勢",
+                            icon: "chart.line.uptrend.xyaxis",
+                            iconColor: AppColor.secondary,
+                            destination: PnLChartView()
+                        )
+
+                        toolCard(
                             title: "交易日誌",
                             subtitle: "瀏覽所有交易日誌，查看 R-Multiple 統計與停損紀律分析",
                             icon: "book.fill",

@@ -11,13 +11,12 @@ final class AddInvestmentViewModel {
     var ticker: String = ""
     var buyPriceText: String = ""
     var quantityText: String = ""
-    var buyReason: String = ""
     var buyMarketCondition: MarketCondition?
     var showingAlert: Bool = false
     var alertMessage: String = ""
 
     // MARK: - 交易日誌（進場前 + 執行中）
-    var journalExpanded: Bool = false
+    var journalExpanded: Bool = true
     var tradeMarket: TradeMarket = .tw
     var tradeDirection: TradeDirection = .long
     var journalSetup: String = ""
@@ -186,12 +185,14 @@ final class AddInvestmentViewModel {
             showingAlert = true
             return false
         }
+        // 進場理由同時作為買入原因（兩欄位合併）
+        let reason = journalSetup.trimmingCharacters(in: .whitespacesAndNewlines)
         let investment = Investment(
             ticker: saveTicker,
             buyDate: selectedDate,
             buyPrice: buyPrice,
             quantity: quantity,
-            buyReason: buyReason.trimmingCharacters(in: .whitespacesAndNewlines),
+            buyReason: reason,
             buyMarketCondition: buyMarketCondition
         )
         context.insert(investment)

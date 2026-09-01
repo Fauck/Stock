@@ -30,6 +30,9 @@ final class PortfolioListViewModel {
     var weekStats: [String: WeekStats] = [:]
     var isFetchingWeekStats: Bool = false
 
+    /// 買入後最高價 [ticker: highestPrice]（用於移動停利）
+    var highSinceBuy: [String: Double] = [:]
+
     /// API 查到的中文名稱快取 [symbol: name]
     var stockNames: [String: String] = [:]
 
@@ -241,6 +244,7 @@ final class PortfolioListViewModel {
             // 定義回傳型別
             struct CandleResult: Sendable {
                 let ticker: String
+                let dates: [String]
                 let closes: [Double]
                 let highs: [Double]
                 let lows: [Double]
@@ -258,6 +262,7 @@ final class PortfolioListViewModel {
                             let sorted = response.data.sorted { $0.date < $1.date }
                             return CandleResult(
                                 ticker: ticker,
+                                dates: sorted.map(\.date),
                                 closes: sorted.map(\.close),
                                 highs: sorted.map(\.high),
                                 lows: sorted.map(\.low),
@@ -275,7 +280,19 @@ final class PortfolioListViewModel {
                 return collected
             }
 
-            // 在 MainActor 上計算信號
+            // 在 MainActor 上計算信號 + 買入後最高價
+            let buyDateFormatter = DateFormatter()
+            buyDateFormatter.dateFormat = "yyyy-MM-dd"
+            buyDateFormatter.locale = Locale(identifier: "en_US_POSIX")
+
+            // 建立 ticker → 最早買入日映射
+            var earliestBuyDates: [String: String] = [:]
+            for group in groups {
+                if let earliest = group.investments.map(\.buyDate).min() {
+                    earliestBuyDates[group.ticker] = buyDateFormatter.string(from: earliest)
+                }
+            }
+
             for result in results {
                 let summary = TechnicalIndicators.computeSignalSummary(
                     closes: result.closes, highs: result.highs, lows: result.lows,
@@ -283,6 +300,25 @@ final class PortfolioListViewModel {
                     settings: settings
                 )
                 technicalSignals[result.ticker] = summary
+
+                // 計算買入後最高價
+                if let buyDateStr = earliestBuyDates[result.ticker] {
+                    var maxHigh: Double = 0
+                    for (i, date) in result.dates.enumerated() where date >= buyDateStr {
+                        maxHigh = max(maxHigh, result.highs[i])
+                    }
+                    // 如果 K 線都在買入日之前（持有超過 60 天），用全部 highs 的 max
+                    if maxHigh == 0, let allMax = result.highs.max() {
+                        maxHigh = allMax
+                    }
+                    // 與當前即時價比較，取較大者
+                    if let price = currentPrice(for: result.ticker) {
+                        maxHigh = max(maxHigh, price)
+                    }
+                    if maxHigh > 0 {
+                        highSinceBuy[result.ticker] = maxHigh
+                    }
+                }
             }
 
             guard !Task.isCancelled else { return }

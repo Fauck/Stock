@@ -9,6 +9,9 @@ struct TradingFeeSettings: Codable, Equatable, Sendable {
     /// 證券交易稅率（預設 0.3%）— 僅賣出時收取
     var taxRate: Double = 0.003
 
+    /// 移動停利 — 從最高價回撤百分比 (%)，預設 10%
+    var trailingStopPct: Double = 10
+
     // MARK: - Defaults
 
     static let defaults = TradingFeeSettings()
@@ -63,4 +66,5 @@ struct TradingFeeSettings: Codable, Equatable, Sendable {
     func netProfitLoss(buyPrice: Double, sellPrice: Double, quantity: Double) -> Double {
         (sellPrice - buyPrice) * quantity - totalFees(buyPrice: buyPrice, sellPrice: sellPrice, quantity: quantity)
     }
+
 }
