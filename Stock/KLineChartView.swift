@@ -185,8 +185,12 @@ struct KLineChartView: View {
                     )
                 }
 
-                // 買入標記
-                drawBuyMarker(context: context, layout: layout, area: area)
+                // 買入標記（單筆 or 多筆）
+                if layout.buyIndex != nil {
+                    drawBuyMarker(context: context, layout: layout, area: area)
+                } else if !layout.buyIndices.isEmpty {
+                    drawBuyMarkers(context: context, layout: layout, area: area)
+                }
 
                 // 賣出標記
                 drawSellMarker(context: context, layout: layout, area: area)
@@ -318,6 +322,29 @@ struct KLineChartView: View {
         context.draw(context.resolve(text), at: CGPoint(x: x, y: min(y + 7, area.maxY)), anchor: .center)
     }
 
+    /// 庫存總覽用：多筆買入標記
+    private func drawBuyMarkers(context: GraphicsContext, layout: ChartLayout, area: CGRect) {
+        for marker in layout.buyIndices {
+            let idx = marker.index
+            guard idx >= 0, idx < vm.candles.count else { continue }
+            let x = layout.xForIndex(idx, in: area)
+            let candle = vm.candles[idx]
+            let lowY = layout.yForPrice(candle.low, in: area)
+            let y = min(lowY + 12, area.maxY - 4)
+
+            let size: CGFloat = 8
+            var triangle = Path()
+            triangle.move(to: CGPoint(x: x, y: y - size))
+            triangle.addLine(to: CGPoint(x: x - size / 2, y: y))
+            triangle.addLine(to: CGPoint(x: x + size / 2, y: y))
+            triangle.closeSubpath()
+            context.fill(triangle, with: .color(AppColor.secondary))
+
+            let text = Text("買").font(.system(size: 9, weight: .bold, design: .rounded)).foregroundColor(AppColor.secondary)
+            context.draw(context.resolve(text), at: CGPoint(x: x, y: min(y + 7, area.maxY)), anchor: .center)
+        }
+    }
+
     private func drawSellMarker(context: GraphicsContext, layout: ChartLayout, area: CGRect) {
         guard let idx = layout.sellIndex else { return }
         let x = layout.xForIndex(idx, in: area)
@@ -327,7 +354,7 @@ struct KLineChartView: View {
         // 確保標記在可視範圍內（向上偏移，但不超出區域）
         let y = max(highY - 12, area.minY + 4)
 
-        let isProfit = (vm.investment.sellPrice ?? 0) >= vm.investment.buyPrice
+        let isProfit = (vm.investment?.sellPrice ?? 0) >= (vm.investment?.buyPrice ?? 0)
         let color = isProfit ? AppColor.softUp : AppColor.softDown
 
         // 下三角
@@ -359,15 +386,22 @@ struct KLineChartView: View {
 
         var annotations: [Annotation] = []
 
-        // 買入價
-        if layout.buyIndex != nil {
-            let buyY = layout.yForPrice(vm.buyMarker.price, in: area)
-            annotations.append(Annotation(label: "買 \(formatPrice(vm.buyMarker.price))", price: vm.buyMarker.price, color: AppColor.secondary, idealY: buyY))
+        // 買入價（單筆模式）
+        if let buy = vm.buyMarker, layout.buyIndex != nil {
+            let buyY = layout.yForPrice(buy.price, in: area)
+            annotations.append(Annotation(label: "買 \(formatPrice(buy.price))", price: buy.price, color: AppColor.secondary, idealY: buyY))
+        }
+        // 買入價（多筆模式：庫存總覽）
+        if layout.buyIndex == nil {
+            for marker in layout.buyIndices {
+                let buyY = layout.yForPrice(marker.price, in: area)
+                annotations.append(Annotation(label: "買 \(formatPrice(marker.price))", price: marker.price, color: AppColor.secondary, idealY: buyY))
+            }
         }
 
         // 賣出價
         if let sell = vm.sellMarker, layout.sellIndex != nil {
-            let isProfit = (vm.investment.sellPrice ?? 0) >= vm.investment.buyPrice
+            let isProfit = (vm.investment?.sellPrice ?? 0) >= (vm.investment?.buyPrice ?? 0)
             let color = isProfit ? AppColor.softUp : AppColor.softDown
             let sellY = layout.yForPrice(sell.price, in: area)
             annotations.append(Annotation(label: "賣 \(formatPrice(sell.price))", price: sell.price, color: color, idealY: sellY))
@@ -647,6 +681,8 @@ private struct ChartLayout {
     let priceRange: Double
     let candleWidth: CGFloat
     let buyIndex: Int?
+    /// 多筆買入標記的 index（庫存總覽用）
+    let buyIndices: [(index: Int, price: Double)]
     let sellIndex: Int?
     let showVolume: Bool
     let volumeMax: Int
@@ -661,7 +697,11 @@ private struct ChartLayout {
         self.volumeMax = vm.volumeMax
 
         // 找最近的蠟燭 index
-        self.buyIndex = Self.closestIndex(to: vm.buyMarker.date, in: candles)
+        self.buyIndex = vm.buyMarker.flatMap { Self.closestIndex(to: $0.date, in: candles) }
+        self.buyIndices = vm.buyMarkers.compactMap { marker in
+            guard let idx = Self.closestIndex(to: marker.date, in: candles) else { return nil }
+            return (index: idx, price: marker.price)
+        }
         self.sellIndex = vm.sellMarker.flatMap { Self.closestIndex(to: $0.date, in: candles) }
 
         // 計算價格範圍（含標記線）
@@ -674,8 +714,11 @@ private struct ChartLayout {
             lo = min(lo, pe)
             hi = max(hi, pe)
         }
-        lo = min(lo, vm.buyMarker.price)
-        hi = max(hi, vm.buyMarker.price)
+        // 擴展以包含所有買入標記
+        for marker in vm.buyMarkers {
+            lo = min(lo, marker.price)
+            hi = max(hi, marker.price)
+        }
         if let sell = vm.sellMarker {
             lo = min(lo, sell.price)
             hi = max(hi, sell.price)

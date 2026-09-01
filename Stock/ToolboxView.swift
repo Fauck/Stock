@@ -17,6 +17,14 @@ struct ToolboxView: View {
                 ScrollView {
                     VStack(spacing: 12) {
                         toolCard(
+                            title: "盤中分析",
+                            subtitle: "當日分價量表、成交明細與大單追蹤",
+                            icon: "waveform.path.ecg",
+                            iconColor: AppColor.secondary,
+                            destination: IntradayAnalysisView()
+                        )
+
+                        toolCard(
                             title: "交易日誌",
                             subtitle: "瀏覽所有交易日誌，查看 R-Multiple 統計與停損紀律分析",
                             icon: "book.fill",

@@ -154,6 +154,170 @@ actor StockService {
         return result
     }
 
+    // MARK: - Intraday Trades & Volumes API
+
+    /// 逐筆成交項目
+    struct IntradayTradeItem: Decodable, Sendable {
+        let bid: Double?
+        let ask: Double?
+        let price: Double
+        let size: Int
+        let volume: Int
+        let time: Int       // Unix timestamp (ms)
+        let serial: Int
+    }
+
+    /// 逐筆成交 API 回應
+    struct IntradayTradesResponse: Decodable, Sendable {
+        let date: String?
+        let symbol: String?
+        let data: [IntradayTradeItem]
+    }
+
+    /// 分價量項目
+    struct IntradayVolumeItem: Decodable, Sendable {
+        let price: Double
+        let volume: Int
+        let volumeAtBid: Int
+        let volumeAtAsk: Int
+    }
+
+    /// 分價量 API 回應
+    struct IntradayVolumesResponse: Decodable, Sendable {
+        let date: String?
+        let symbol: String?
+        let data: [IntradayVolumeItem]
+    }
+
+    /// 取得當日逐筆成交明細
+    func fetchIntradayTrades(symbol: String, limit: Int = 200) async throws -> IntradayTradesResponse {
+        let urlString = "\(baseURL)/intraday/trades/\(symbol)?limit=\(limit)&sort=desc"
+        guard let url = URL(string: urlString) else { throw StockServiceError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
+        request.timeoutInterval = 10
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
+        guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
+
+        return try JSONDecoder().decode(IntradayTradesResponse.self, from: data)
+    }
+
+    /// 取得當日分價量統計
+    func fetchIntradayVolumes(symbol: String) async throws -> IntradayVolumesResponse {
+        let urlString = "\(baseURL)/intraday/volumes/\(symbol)"
+        guard let url = URL(string: urlString) else { throw StockServiceError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
+        request.timeoutInterval = 10
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
+        guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
+
+        return try JSONDecoder().decode(IntradayVolumesResponse.self, from: data)
+    }
+
+    // MARK: - Historical Stats API
+
+    /// 52 週統計回應
+    struct StatsResponse: Decodable, Sendable {
+        let symbol: String?
+        let name: String?
+        let closePrice: Double?
+        let week52High: Double?
+        let week52Low: Double?
+    }
+
+    /// 取得個股 52 週統計（高低點）
+    func fetchStats(symbol: String) async throws -> StatsResponse {
+        let urlString = "\(baseURL)/historical/stats/\(symbol)"
+        guard let url = URL(string: urlString) else { throw StockServiceError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
+        request.timeoutInterval = 10
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
+        guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
+
+        return try JSONDecoder().decode(StatsResponse.self, from: data)
+    }
+
+    // MARK: - Snapshot API
+
+    /// 快照個股項目（movers / actives 共用）
+    struct SnapshotItem: Decodable, Sendable {
+        let symbol: String
+        let name: String
+        let openPrice: Double?
+        let highPrice: Double?
+        let lowPrice: Double?
+        let closePrice: Double?
+        let change: Double?
+        let changePercent: Double?
+        let tradeVolume: Int?
+        let tradeValue: Double?
+    }
+
+    /// 快照 API 回應
+    struct SnapshotResponse: Decodable {
+        let date: String?
+        let time: String?
+        let market: String?
+        let data: [SnapshotItem]
+    }
+
+    /// 漲跌幅排行
+    /// - Parameters:
+    ///   - market: 市場（TSE / OTC）
+    ///   - direction: up = 漲幅、down = 跌幅
+    ///   - change: percent = 百分比、value = 點數
+    func fetchMovers(
+        market: String = "TSE",
+        direction: String = "up",
+        change: String = "percent"
+    ) async throws -> SnapshotResponse {
+        let urlString = "\(baseURL)/snapshot/movers/\(market)?direction=\(direction)&change=\(change)&type=COMMONSTOCK"
+        guard let url = URL(string: urlString) else { throw StockServiceError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
+        request.timeoutInterval = 10
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
+        guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
+
+        return try JSONDecoder().decode(SnapshotResponse.self, from: data)
+    }
+
+    /// 成交量/成交值排行
+    /// - Parameters:
+    ///   - market: 市場（TSE / OTC）
+    ///   - trade: volume = 成交量、value = 成交值
+    func fetchActives(
+        market: String = "TSE",
+        trade: String = "volume"
+    ) async throws -> SnapshotResponse {
+        let urlString = "\(baseURL)/snapshot/actives/\(market)?trade=\(trade)&type=COMMONSTOCK"
+        guard let url = URL(string: urlString) else { throw StockServiceError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
+        request.timeoutInterval = 10
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
+        guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
+
+        return try JSONDecoder().decode(SnapshotResponse.self, from: data)
+    }
+
     /// 批次取得多檔即時報價
     func fetchQuotes(symbols: [String]) async -> [String: StockQuoteResult] {
         var results: [String: StockQuoteResult] = [:]

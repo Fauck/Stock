@@ -22,6 +22,14 @@ final class PortfolioListViewModel {
     /// 是否正在載入技術指標
     var isFetchingSignals: Bool = false
 
+    /// 52 週高低統計
+    struct WeekStats: Sendable {
+        let high52w: Double
+        let low52w: Double
+    }
+    var weekStats: [String: WeekStats] = [:]
+    var isFetchingWeekStats: Bool = false
+
     /// API 查到的中文名稱快取 [symbol: name]
     var stockNames: [String: String] = [:]
 
@@ -36,12 +44,17 @@ final class PortfolioListViewModel {
     var selectedGroup: PortfolioGroup?
     var showingGroupSellSheet: Bool = false
 
+    // 個股分析 sheet
+    var selectedGroupForDetail: PortfolioGroup? = nil
+    var showingStockDetailSheet: Bool = false
+
     // 刪除
     var investmentToDelete: Investment?
     var showingDeleteAlert: Bool = false
 
     private var fetchTask: Task<Void, Never>?
     private var signalTask: Task<Void, Never>?
+    private var weekStatsTask: Task<Void, Never>?
 
     // MARK: - Computed
 
@@ -262,6 +275,59 @@ final class PortfolioListViewModel {
         }
     }
 
+    // MARK: - 52 週統計載入
+
+    /// 批次載入所有持有標的的 52 週高低點
+    func fetchWeekStats() {
+        let tickers = groups.map(\.ticker)
+        guard !tickers.isEmpty else { return }
+
+        weekStatsTask?.cancel()
+        weekStatsTask = Task { @MainActor in
+            isFetchingWeekStats = true
+
+            // 預先解析代號（MainActor 上）
+            var tickerSymbols: [(String, String)] = []
+            for ticker in tickers {
+                let symbol = StockMapping.resolve(ticker).symbol
+                tickerSymbols.append((ticker, symbol))
+            }
+
+            struct StatsResult: Sendable {
+                let ticker: String
+                let high52w: Double
+                let low52w: Double
+            }
+
+            let results = await withTaskGroup(of: StatsResult?.self) { group in
+                for (ticker, symbol) in tickerSymbols {
+                    group.addTask {
+                        do {
+                            let response = try await StockService.shared.fetchStats(symbol: symbol)
+                            guard let high = response.week52High, let low = response.week52Low,
+                                  high > 0, low > 0 else { return nil }
+                            return StatsResult(ticker: ticker, high52w: high, low52w: low)
+                        } catch {
+                            return nil
+                        }
+                    }
+                }
+                var collected: [StatsResult] = []
+                for await result in group {
+                    if let result { collected.append(result) }
+                }
+                return collected
+            }
+
+            for result in results {
+                weekStats[result.ticker] = WeekStats(high52w: result.high52w, low52w: result.low52w)
+            }
+
+            guard !Task.isCancelled else { return }
+            isFetchingWeekStats = false
+        }
+    }
+
     // MARK: - Actions
 
     func selectForSell(_ investment: Investment) {
@@ -272,6 +338,11 @@ final class PortfolioListViewModel {
     func selectGroupForSell(_ group: PortfolioGroup) {
         selectedGroup = group
         showingGroupSellSheet = true
+    }
+
+    func openStockDetail(_ group: PortfolioGroup) {
+        selectedGroupForDetail = group
+        showingStockDetailSheet = true
     }
 
     func confirmDelete(_ investment: Investment) {

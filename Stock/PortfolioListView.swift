@@ -44,6 +44,17 @@ struct PortfolioListView: View {
                     GroupSellView(group: group)
                 }
             }
+            .sheet(isPresented: $vm.showingStockDetailSheet) {
+                if let group = vm.selectedGroupForDetail {
+                    StockDetailSheetView(
+                        group: group,
+                        signal: vm.technicalSignals[group.ticker],
+                        weekStats: vm.weekStats[group.ticker],
+                        currentPrice: vm.currentPrice(for: group.ticker),
+                        displayName: vm.displayName(for: group.ticker)
+                    )
+                }
+            }
             .alert("確認刪除", isPresented: $vm.showingDeleteAlert, presenting: vm.investmentToDelete) { _ in
                 Button("刪除", role: .destructive) {
                     withAnimation {
@@ -58,6 +69,7 @@ struct PortfolioListView: View {
                 vm.investments = investments
                 vm.fetchAllPrices()
                 vm.fetchTechnicalSignals()
+                vm.fetchWeekStats()
             }
             .onChange(of: investments) { _, newValue in
                 vm.investments = newValue
@@ -116,12 +128,13 @@ struct PortfolioListView: View {
                     .font(.warmHeadline())
                     .foregroundStyle(AppColor.textMain)
                 Spacer()
-                // 重新整理即時價 + 技術指標
+                // 重新整理即時價 + 技術指標 + 52週統計
                 Button {
                     vm.fetchAllPrices()
                     vm.fetchTechnicalSignals()
+                    vm.fetchWeekStats()
                 } label: {
-                    if vm.isFetchingPrices || vm.isFetchingSignals {
+                    if vm.isFetchingPrices || vm.isFetchingSignals || vm.isFetchingWeekStats {
                         ProgressView()
                             .scaleEffect(0.7)
                     } else {
@@ -130,7 +143,7 @@ struct PortfolioListView: View {
                             .foregroundStyle(AppColor.primary)
                     }
                 }
-                .disabled(vm.isFetchingPrices || vm.isFetchingSignals)
+                .disabled(vm.isFetchingPrices || vm.isFetchingSignals || vm.isFetchingWeekStats)
             }
 
             AppColor.divider.frame(height: 1)
@@ -220,7 +233,7 @@ struct PortfolioListView: View {
                                 .font(.warmCaption2())
                                 .foregroundStyle(AppColor.textSecondary)
                             if let signal = vm.technicalSignals[group.ticker] {
-                                compactSignalBadges(signal)
+                                compactSignalBadges(signal, ticker: group.ticker)
                             }
                         }
                     }
@@ -237,6 +250,19 @@ struct PortfolioListView: View {
                     }
 
                     Spacer()
+
+                    // 個股分析按鈕
+                    Button {
+                        vm.openStockDetail(group)
+                    } label: {
+                        Image(systemName: "chart.xyaxis.line")
+                            .font(.system(size: 14))
+                            .foregroundStyle(AppColor.primary)
+                            .frame(width: 28, height: 28)
+                            .background(AppColor.primary.opacity(0.1))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
 
                     // 右：即時價 + 漲跌 + 損益
                     if let price = currentPrice {
@@ -380,12 +406,6 @@ struct PortfolioListView: View {
                         .padding(.horizontal, 14)
                     }
 
-                    // 技術指標信號
-                    if let signal = vm.technicalSignals[group.ticker] {
-                        technicalSignalView(signal)
-                            .padding(.horizontal, 14)
-                    }
-
                     // 資訊徽章列
                     HStack {
                         WarmInfoBadge(title: "均價", value: String(format: "$%.2f", group.weightedAverageCost))
@@ -419,6 +439,18 @@ struct PortfolioListView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .frame(maxWidth: 100)
                         Spacer()
+
+                        // 盤中分析
+                        NavigationLink(destination: IntradayAnalysisView(symbol: group.ticker)) {
+                            Text("盤中")
+                                .font(.warmCaption2())
+                                .fontWeight(.medium)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .foregroundStyle(AppColor.secondary)
+                                .background(AppColor.secondary.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
 
                         // 整批賣出
                         Button {
@@ -525,13 +557,24 @@ struct PortfolioListView: View {
 
     /// 摺疊狀態下的精簡信號徽章
     @ViewBuilder
-    private func compactSignalBadges(_ signal: TechnicalIndicators.SignalSummary) -> some View {
+    private func compactSignalBadges(_ signal: TechnicalIndicators.SignalSummary, ticker: String) -> some View {
         // 只顯示重要信號：超買超賣 或 KD 交叉
         if let rsiSig = signal.rsiSignal, let label = rsiSig.label {
             signalPill(label, color: rsiSig == .overbought ? AppColor.softUp : AppColor.softDown)
         }
         if let kdjSig = signal.kdjSignal, let label = kdjSig.label {
             signalPill(label, color: kdjSig == .goldenCross ? AppColor.secondary : AppColor.softDown)
+        }
+        // 52 週位置警示
+        if let stats = vm.weekStats[ticker],
+           let price = vm.currentPrice(for: ticker),
+           stats.high52w > stats.low52w {
+            let pct = (price - stats.low52w) / (stats.high52w - stats.low52w)
+            if pct >= 0.95 {
+                signalPill("近52W高", color: AppColor.softUp)
+            } else if pct <= 0.05 {
+                signalPill("近52W低", color: AppColor.softDown)
+            }
         }
     }
 
@@ -601,6 +644,116 @@ struct PortfolioListView: View {
         .padding(10)
         .background(AppColor.background.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    // MARK: - 52 週區間顯示
+
+    /// 展開狀態下的 52 週高低點區間
+    private func weekStatsView(
+        stats: PortfolioListViewModel.WeekStats,
+        currentPrice: Double?,
+        avgCost: Double
+    ) -> some View {
+        let range = stats.high52w - stats.low52w
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("52週區間")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+                if vm.isFetchingWeekStats {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                }
+            }
+
+            // 現價位置
+            if let price = currentPrice {
+                let pct = min(1, max(0, (price - stats.low52w) / range))
+                rangeBar(
+                    label: "現價",
+                    value: price,
+                    percentile: pct,
+                    low: stats.low52w,
+                    high: stats.high52w
+                )
+            }
+
+            // 買入均價位置
+            let avgPct = min(1, max(0, (avgCost - stats.low52w) / range))
+            rangeBar(
+                label: "均價",
+                value: avgCost,
+                percentile: avgPct,
+                low: stats.low52w,
+                high: stats.high52w
+            )
+        }
+        .padding(10)
+        .background(AppColor.background.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// 52 週區間進度條
+    private func rangeBar(
+        label: String,
+        value: Double,
+        percentile: Double,
+        low: Double,
+        high: Double
+    ) -> some View {
+        let barColor: Color = {
+            if percentile > 0.7 { return AppColor.softUp }
+            if percentile < 0.3 { return AppColor.softDown }
+            return AppColor.primary
+        }()
+
+        return VStack(spacing: 4) {
+            // 標籤列：低 ... 百分位 ... 高
+            HStack {
+                Text(String(format: "低 $%.1f", low))
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+                Text(String(format: "%@ $%.2f (%d%%)", label, value, Int(percentile * 100)))
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(barColor)
+                Spacer()
+                Text(String(format: "$%.1f 高", high))
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            // 進度條
+            GeometryReader { geo in
+                let trackWidth = geo.size.width
+                let dotX = trackWidth * percentile
+
+                ZStack(alignment: .leading) {
+                    // 底部軌道
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(AppColor.divider)
+                        .frame(height: 4)
+
+                    // 填色
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(barColor.opacity(0.5))
+                        .frame(width: max(0, dotX), height: 4)
+
+                    // 圓點標記
+                    Circle()
+                        .fill(barColor)
+                        .frame(width: 8, height: 8)
+                        .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                        .offset(x: max(0, min(dotX - 4, trackWidth - 8)))
+                }
+            }
+            .frame(height: 8)
+        }
     }
 
     /// 信號膠囊標籤

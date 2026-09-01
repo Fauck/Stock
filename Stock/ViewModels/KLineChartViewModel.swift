@@ -16,8 +16,11 @@ struct CandleItem: Identifiable, Sendable {
 /// K 線圖 ViewModel：管理歷史 K 線資料取得、日期範圍、互動狀態
 @Observable
 final class KLineChartViewModel {
-    let investment: Investment
-    let journal: TradeJournal
+    let investment: Investment?
+    let journal: TradeJournal?
+    let ticker: String
+    /// 庫存總覽用：多筆買入標記
+    let portfolioGroup: PortfolioGroup?
 
     var candles: [CandleItem] = []
     var isLoading = false
@@ -49,31 +52,55 @@ final class KLineChartViewModel {
         return f
     }()
 
+    /// 交易日誌用：帶買賣標記
     init(investment: Investment, journal: TradeJournal) {
         self.investment = investment
         self.journal = journal
+        self.ticker = investment.ticker
+        self.portfolioGroup = nil
+    }
+
+    /// 庫存總覽用：帶多筆買入標記
+    init(group: PortfolioGroup) {
+        self.investment = nil
+        self.journal = nil
+        self.ticker = group.ticker
+        self.portfolioGroup = group
     }
 
     // MARK: - Computed Markers
 
-    var buyMarker: (date: Date, price: Double) {
-        (investment.buyDate, investment.buyPrice)
+    var buyMarker: (date: Date, price: Double)? {
+        guard let inv = investment else { return nil }
+        return (inv.buyDate, inv.buyPrice)
+    }
+
+    /// 庫存總覽用：多筆買入標記
+    var buyMarkers: [(date: Date, price: Double)] {
+        if let group = portfolioGroup {
+            return group.investments.map { ($0.buyDate, $0.buyPrice) }
+        }
+        if let inv = investment {
+            return [(inv.buyDate, inv.buyPrice)]
+        }
+        return []
     }
 
     var sellMarker: (date: Date, price: Double)? {
-        guard investment.isClosed,
-              let sellDate = investment.sellDate,
-              let sellPrice = investment.sellPrice else { return nil }
+        guard let inv = investment, inv.isClosed,
+              let sellDate = inv.sellDate,
+              let sellPrice = inv.sellPrice else { return nil }
         return (sellDate, sellPrice)
     }
 
     var stopLossPrice: Double? {
-        journal.initialStopLoss
+        journal?.initialStopLoss
     }
 
     var plannedEntryPrice: Double? {
-        guard let planned = journal.plannedEntryPrice,
-              abs(planned - investment.buyPrice) > 0.01 else { return nil }
+        guard let inv = investment,
+              let planned = journal?.plannedEntryPrice,
+              abs(planned - inv.buyPrice) > 0.01 else { return nil }
         return planned
     }
 
@@ -91,19 +118,32 @@ final class KLineChartViewModel {
         errorMessage = nil
 
         let calendar = Calendar.current
-        let endDate = investment.sellDate ?? Date()
+        let endDate: Date
+        let clampedStart: Date
 
-        // 買入日前推 45 日曆日（約 30 個交易日）
-        let startDate = calendar.date(byAdding: .day, value: -45, to: investment.buyDate) ?? investment.buyDate
-
-        // 上限 1 年
-        let oneYearBefore = calendar.date(byAdding: .year, value: -1, to: endDate) ?? endDate
-        let clampedStart = max(startDate, oneYearBefore)
+        if let inv = investment {
+            // 交易日誌模式：買入日前推 45 天 → 賣出日/今日
+            endDate = inv.sellDate ?? Date()
+            let startDate = calendar.date(byAdding: .day, value: -45, to: inv.buyDate) ?? inv.buyDate
+            let oneYearBefore = calendar.date(byAdding: .year, value: -1, to: endDate) ?? endDate
+            clampedStart = max(startDate, oneYearBefore)
+        } else if let group = portfolioGroup,
+                  let earliestBuyDate = group.investments.map(\.buyDate).min() {
+            // 庫存總覽模式：最早買入日前推 45 天 → 今日
+            endDate = Date()
+            let startDate = calendar.date(byAdding: .day, value: -45, to: earliestBuyDate) ?? earliestBuyDate
+            let oneYearBefore = calendar.date(byAdding: .year, value: -1, to: endDate) ?? endDate
+            clampedStart = max(startDate, oneYearBefore)
+        } else {
+            // 僅 ticker 模式：近 6 個月
+            endDate = Date()
+            clampedStart = calendar.date(byAdding: .month, value: -6, to: endDate) ?? endDate
+        }
 
         let fromStr = Self.apiDateFormatter.string(from: clampedStart)
         let toStr = Self.apiDateFormatter.string(from: endDate)
 
-        let symbol = StockMapping.resolve(investment.ticker).symbol
+        let symbol = StockMapping.resolve(ticker).symbol
 
         do {
             let response = try await StockService.shared.fetchHistoricalCandles(
