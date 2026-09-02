@@ -67,6 +67,11 @@ final class PortfolioListViewModel {
     private static let weekStatsCacheDateKey = "weekStatsCacheDate"
     private static let institutionalCacheKey = "institutionalCache"
     private static let institutionalCacheDateKey = "institutionalCacheDate"
+    private static let candleCacheKey = "candleCache"
+    private static let candleCacheDateKey = "candleCacheDate"
+
+    /// 上次成功載入的日期（用於判斷重新整理是否需要重抓）
+    private var lastLoadDate: String?
 
     // MARK: - Computed
 
@@ -225,20 +230,34 @@ final class PortfolioListViewModel {
     /// 分優先級載入所有資料：
     /// 1. 即時報價（最高優先，影響卡片核心數字）
     /// 2. 即時價完成後 → 技術指標 + 52 週統計 + 法人 並行載入
-    /// forceRefresh = true 時會忽略快取
+    /// forceRefresh = true 時（重新整理按鈕），若日期與上次相同則只刷新即時報價，
+    /// 快取類資料（K 線 / 52 週 / 法人）不重抓。跨日才真正強制刷新。
     func loadData(forceRefresh: Bool = false) {
         loadDataTask?.cancel()
         loadDataTask = Task { @MainActor in
-            // Phase 1：即時報價
+            let todayStr = Self.todayString()
+
+            // 判斷是否需要重抓快取資料
+            let needRefreshCache: Bool
+            if forceRefresh {
+                // 重新整理按鈕：跨日才真正刷新快取，同日只刷即時價
+                needRefreshCache = (lastLoadDate != todayStr)
+            } else {
+                needRefreshCache = false
+            }
+
+            // Phase 1：即時報價（永遠重抓）
             await fetchAllPricesAsync()
 
             guard !Task.isCancelled else { return }
 
             // Phase 2：次要資料並行載入
-            async let signalsTask: () = fetchTechnicalSignalsAsync()
-            async let weekTask: () = fetchWeekStatsIfNeeded(forceRefresh: forceRefresh)
-            async let instTask: () = fetchInstitutionalIfNeeded(forceRefresh: forceRefresh)
+            async let signalsTask: () = fetchTechnicalSignalsIfNeeded(forceRefresh: needRefreshCache)
+            async let weekTask: () = fetchWeekStatsIfNeeded(forceRefresh: needRefreshCache)
+            async let instTask: () = fetchInstitutionalIfNeeded(forceRefresh: needRefreshCache)
             _ = await (signalsTask, weekTask, instTask)
+
+            lastLoadDate = todayStr
         }
     }
 
@@ -280,13 +299,27 @@ final class PortfolioListViewModel {
         isFetchingPrices = false
     }
 
-    /// 可 await 的技術指標載入
-    private func fetchTechnicalSignalsAsync() async {
+    /// 技術指標載入（帶 K 線當日快取）
+    /// K 線為歷史資料，盤後不變，當日只需抓一次
+    private func fetchTechnicalSignalsIfNeeded(forceRefresh: Bool) async {
         let tickers = groups.map(\.ticker)
         guard !tickers.isEmpty else { return }
 
-        isFetchingSignals = true
+        let todayStr = Self.todayString()
         let settings = TechnicalSettings.load()
+
+        // 嘗試讀取 K 線快取
+        if !forceRefresh,
+           let cachedDate = UserDefaults.standard.string(forKey: Self.candleCacheDateKey),
+           cachedDate == todayStr,
+           let data = UserDefaults.standard.data(forKey: Self.candleCacheKey),
+           let cached = try? JSONDecoder().decode([String: CodableCandleData].self, from: data) {
+            // 從快取計算信號
+            applySignalsFromCandles(cached, tickers: tickers, settings: settings)
+            return
+        }
+
+        isFetchingSignals = true
 
         let calendar = Calendar.current
         let today = Date()
@@ -349,6 +382,36 @@ final class PortfolioListViewModel {
             return collected
         }
 
+        guard !Task.isCancelled else { return }
+
+        // 建立快取字典並寫入 UserDefaults
+        var cacheDict: [String: CodableCandleData] = [:]
+        for result in results {
+            cacheDict[result.ticker] = CodableCandleData(
+                dates: result.dates, closes: result.closes,
+                highs: result.highs, lows: result.lows, volumes: result.volumes
+            )
+        }
+        if let encoded = try? JSONEncoder().encode(cacheDict) {
+            UserDefaults.standard.set(encoded, forKey: Self.candleCacheKey)
+            UserDefaults.standard.set(todayStr, forKey: Self.candleCacheDateKey)
+        }
+
+        // 從抓取結果計算信號
+        applySignalsFromCandles(cacheDict, tickers: tickers, settings: settings)
+        isFetchingSignals = false
+    }
+
+    /// 從 K 線資料計算技術指標 + 買入後最高價
+    private func applySignalsFromCandles(
+        _ candles: [String: CodableCandleData],
+        tickers: [String],
+        settings: TechnicalSettings
+    ) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+
         var earliestBuyDates: [String: String] = [:]
         for group in groups {
             if let earliest = group.investments.map(\.buyDate).min() {
@@ -356,33 +419,31 @@ final class PortfolioListViewModel {
             }
         }
 
-        for result in results {
-            let summary = TechnicalIndicators.computeSignalSummary(
-                closes: result.closes, highs: result.highs, lows: result.lows,
-                volumes: result.volumes,
-                settings: settings
-            )
-            technicalSignals[result.ticker] = summary
+        for ticker in tickers {
+            guard let candle = candles[ticker] else { continue }
 
-            if let buyDateStr = earliestBuyDates[result.ticker] {
+            let summary = TechnicalIndicators.computeSignalSummary(
+                closes: candle.closes, highs: candle.highs, lows: candle.lows,
+                volumes: candle.volumes, settings: settings
+            )
+            technicalSignals[ticker] = summary
+
+            if let buyDateStr = earliestBuyDates[ticker] {
                 var maxHigh: Double = 0
-                for (i, date) in result.dates.enumerated() where date >= buyDateStr {
-                    maxHigh = max(maxHigh, result.highs[i])
+                for (i, date) in candle.dates.enumerated() where date >= buyDateStr {
+                    maxHigh = max(maxHigh, candle.highs[i])
                 }
-                if maxHigh == 0, let allMax = result.highs.max() {
+                if maxHigh == 0, let allMax = candle.highs.max() {
                     maxHigh = allMax
                 }
-                if let price = currentPrice(for: result.ticker) {
+                if let price = currentPrice(for: ticker) {
                     maxHigh = max(maxHigh, price)
                 }
                 if maxHigh > 0 {
-                    highSinceBuy[result.ticker] = maxHigh
+                    highSinceBuy[ticker] = maxHigh
                 }
             }
         }
-
-        guard !Task.isCancelled else { return }
-        isFetchingSignals = false
     }
 
     /// 52 週統計（帶當日快取）
@@ -592,6 +653,15 @@ final class PortfolioListViewModel {
     }
 }
 // MARK: - Codable 快取結構
+
+/// K 線歷史資料快取用
+private struct CodableCandleData: Codable {
+    let dates: [String]
+    let closes: [Double]
+    let highs: [Double]
+    let lows: [Double]
+    let volumes: [Int]
+}
 
 /// 52 週統計快取用
 private struct CodableWeekStats: Codable {
