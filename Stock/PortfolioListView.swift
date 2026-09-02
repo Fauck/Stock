@@ -69,16 +69,13 @@ struct PortfolioListView: View {
             }
             .onAppear {
                 vm.investments = investments
-                vm.fetchAllPrices()
-                vm.fetchTechnicalSignals()
-                vm.fetchWeekStats()
-                vm.fetchInstitutionalData()
+                vm.loadData()
             }
             .onChange(of: investments) { _, newValue in
                 vm.investments = newValue
-                // 資料更新時重新拉取即時價（含首次 @Query 載入完成時）
+                // 資料更新時重新載入（含首次 @Query 載入完成時）
                 if !newValue.isEmpty && !vm.hasAnyPrice {
-                    vm.fetchAllPrices()
+                    vm.loadData()
                 }
             }
         }
@@ -133,10 +130,7 @@ struct PortfolioListView: View {
                 Spacer()
                 // 重新整理即時價 + 技術指標 + 52週統計 + 法人
                 Button {
-                    vm.fetchAllPrices()
-                    vm.fetchTechnicalSignals()
-                    vm.fetchWeekStats()
-                    vm.fetchInstitutionalData()
+                    vm.loadData(forceRefresh: true)
                 } label: {
                     if vm.isFetchingPrices || vm.isFetchingSignals || vm.isFetchingWeekStats || vm.isFetchingInstitutional {
                         ProgressView()
@@ -218,297 +212,286 @@ struct PortfolioListView: View {
     private func groupCard(for group: PortfolioGroup) -> some View {
         let isExpanded = vm.isExpanded(group.ticker)
         let currentPrice = vm.currentPrice(for: group.ticker)
+        let fees = TradingFeeSettings.load()
+        let pl: Double? = currentPrice.map { group.unrealizedProfitLoss(currentPrice: $0, fees: fees) }
+        // 損益色帶色
+        let accentColor: Color = {
+            guard let pl else { return AppColor.divider }
+            return Color.profitLossColor(pl)
+        }()
 
-        return VStack(alignment: .leading, spacing: 0) {
-            // ── 摘要列（始終顯示）──
-            Button {
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    vm.toggleExpanded(group.ticker)
-                }
-            } label: {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 12) {
-                        // 左：中文名稱（主）+ 代號（副）
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(vm.displayName(for: group.ticker))
-                                .font(.warmHeadline())
-                                .foregroundStyle(AppColor.primary)
-                            Text(group.ticker)
-                                .font(.warmCaption2())
-                                .foregroundStyle(AppColor.textSecondary)
-                        }
-                        .frame(minWidth: 60, alignment: .leading)
+        return HStack(spacing: 0) {
+            // ── 左側損益色帶 ──
+            RoundedRectangle(cornerRadius: 2)
+                .fill(accentColor)
+                .frame(width: 3)
+                .padding(.vertical, 8)
 
-                        // 中：股數 + 均價
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(String(format: "%.0f 股", group.totalQuantity))
-                                .font(.warmCaption())
-                                .foregroundStyle(AppColor.textMain)
-                            Text(String(format: "均價 $%.2f", group.weightedAverageCost))
-                                .font(.warmCaption2())
-                                .foregroundStyle(AppColor.textSecondary)
-                        }
+            VStack(alignment: .leading, spacing: 0) {
+                // ── 摘要列（始終顯示）──
+                Button {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        vm.toggleExpanded(group.ticker)
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 7) {
+                        // Row 1：名稱 + 代號（左）｜ 現價 + 分析按鈕（右）
+                        HStack(alignment: .center, spacing: 8) {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(vm.displayName(for: group.ticker))
+                                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(AppColor.primary)
+                                    .lineLimit(1)
+                                Text(group.ticker)
+                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .foregroundStyle(AppColor.textSecondary)
+                            }
 
-                        Spacer()
+                            Spacer(minLength: 8)
 
-                        // 個股分析按鈕
-                        Button {
-                            vm.openStockDetail(group)
-                        } label: {
-                            Image(systemName: "chart.xyaxis.line")
-                                .font(.system(size: 14))
-                                .foregroundStyle(AppColor.primary)
-                                .frame(width: 28, height: 28)
-                                .background(AppColor.primary.opacity(0.1))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-
-                        // 右：即時價 + 漲跌 + 損益
-                        if let price = currentPrice {
-                            let fees = TradingFeeSettings.load()
-                            let pl = group.unrealizedProfitLoss(currentPrice: price, fees: fees)
-                            let pct = group.returnPercentage(currentPrice: price, fees: fees)
-                            let change = vm.dailyChangePoints[group.ticker]
-                            let changePct = vm.dailyChangePercents[group.ticker]
-                            VStack(alignment: .trailing, spacing: 2) {
+                            if let price = currentPrice {
                                 Text(String(format: "$%.2f", price))
-                                    .font(.warmCaption())
-                                    .fontWeight(.semibold)
+                                    .font(.system(size: 19, weight: .bold, design: .rounded))
                                     .foregroundStyle(AppColor.textMain)
-                                // 當日漲跌
-                                if let change, let changePct {
-                                    Text("\(change >= 0 ? "▲" : "▼")\(abs(change), specifier: "%.2f") (\(changePct >= 0 ? "+" : "")\(changePct, specifier: "%.2f")%)")
-                                        .font(.warmCaption2())
-                                        .foregroundStyle(Color.profitLossColor(change))
+                            } else {
+                                Text("--")
+                                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                                    .foregroundStyle(AppColor.textSecondary.opacity(0.3))
+                            }
+
+                            // 個股分析按鈕
+                            Button { vm.openStockDetail(group) } label: {
+                                Image(systemName: "chart.xyaxis.line")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(AppColor.primary)
+                                    .frame(width: 28, height: 28)
+                                    .background(AppColor.primary.opacity(0.08))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        // Row 2：股數 · 均價（左）｜ 漲跌點數 & %（右）
+                        HStack {
+                            HStack(spacing: 0) {
+                                Text(String(format: "%.0f股", group.totalQuantity))
+                                    .foregroundStyle(AppColor.textMain)
+                                Text("｜")
+                                    .foregroundStyle(AppColor.divider)
+                                Text(String(format: "均%.2f", group.weightedAverageCost))
+                                    .foregroundStyle(AppColor.textSecondary)
+                            }
+
+                            Spacer(minLength: 8)
+
+                            if let change = vm.dailyChangePoints[group.ticker],
+                               let changePct = vm.dailyChangePercents[group.ticker] {
+                                HStack(spacing: 3) {
+                                    Image(systemName: change >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                                        .font(.system(size: 7))
+                                    Text(String(format: "%.2f (%.2f%%)", abs(change), abs(changePct)))
                                 }
-                                Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f") (\(pct >= 0 ? "+" : "")\(pct, specifier: "%.1f")%)")
-                                    .font(.warmCaption2())
-                                    .foregroundStyle(Color.profitLossColor(pl))
-                            }
-                        } else {
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text(String(format: "$%.0f", group.totalInvested))
-                                    .font(.warmCaption())
-                                    .fontWeight(.medium)
-                                    .foregroundStyle(AppColor.textMain)
-                                Text("無即時價")
-                                    .font(.warmCaption2())
-                                    .foregroundStyle(AppColor.textSecondary.opacity(0.6))
+                                .foregroundStyle(Color.profitLossColor(change))
                             }
                         }
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .lineLimit(1)
 
-                        // 展開指示箭頭
-                        Image(systemName: "chevron.right")
-                            .font(.warmCaption2())
-                            .foregroundStyle(AppColor.textSecondary.opacity(0.5))
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    }
+                        // Row 3：持有天數（左）｜ 損益金額 & %（右）
+                        HStack {
+                            Text("\(group.holdingDays)天")
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(AppColor.textSecondary)
 
-                    // 技術信號標籤列（獨立一行，自動換行）
-                    if let signal = vm.technicalSignals[group.ticker] {
-                        FlowLayout(spacing: 4) {
-                            compactSignalBadges(signal, ticker: group.ticker)
+                            Spacer(minLength: 8)
+
+                            if let price = currentPrice {
+                                let plVal = group.unrealizedProfitLoss(currentPrice: price, fees: fees)
+                                let pctVal = group.returnPercentage(currentPrice: price, fees: fees)
+                                Text(String(format: "%@$%.0f (%@%.1f%%)", plVal >= 0 ? "+" : "", plVal, pctVal >= 0 ? "+" : "", pctVal))
+                                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Color.profitLossColor(plVal))
+                            }
+                        }
+                        .lineLimit(1)
+
+                        // 技術信號標籤列
+                        if let signal = vm.technicalSignals[group.ticker] {
+                            FlowLayout(spacing: 4) {
+                                compactSignalBadges(signal, ticker: group.ticker)
+                            }
                         }
                     }
+                    .padding(.leading, 10)
+                    .padding(.trailing, 14)
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
                 }
-                .padding(14)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
 
-            // ── 展開的詳細內容 ──
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 12) {
-                    AppColor.divider.frame(height: 1)
-                        .padding(.horizontal, 14)
+                // ── 展開的詳細內容 ──
+                if isExpanded {
+                    VStack(alignment: .leading, spacing: 10) {
+                        AppColor.divider.frame(height: 1)
+                            .padding(.horizontal, 14)
 
-                    // 即時價格 & 損益區塊
-                    if let price = currentPrice {
-                        let fees = TradingFeeSettings.load()
-                        let pl = group.unrealizedProfitLoss(currentPrice: price, fees: fees)
-                        let pct = group.returnPercentage(currentPrice: price, fees: fees)
-                        let marketValue = price * group.totalQuantity
+                        // 數據格：市值 / 成本 / 損益 / 本日增減
+                        if let price = currentPrice {
+                            let plVal = group.unrealizedProfitLoss(currentPrice: price, fees: fees)
+                            let pctVal = group.returnPercentage(currentPrice: price, fees: fees)
+                            let marketValue = price * group.totalQuantity
 
-                        VStack(spacing: 8) {
-                            // 即時價格列
-                            HStack {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "bolt.fill")
-                                        .font(.warmCaption2())
-                                        .foregroundStyle(AppColor.secondary)
-                                    Text("即時價")
-                                        .font(.warmCaption())
-                                        .foregroundStyle(AppColor.textSecondary)
-                                }
-                                Spacer()
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Text(String(format: "$%.2f", price))
-                                        .font(.warmHeadline())
-                                        .foregroundStyle(AppColor.textMain)
-                                    // 當日漲跌點數 & %
-                                    if let change = vm.dailyChangePoints[group.ticker],
-                                       let changePct = vm.dailyChangePercents[group.ticker] {
-                                        Text("\(change >= 0 ? "▲" : "▼")\(abs(change), specifier: "%.2f") (\(changePct >= 0 ? "+" : "")\(changePct, specifier: "%.2f")%)")
-                                            .font(.warmCaption())
-                                            .fontWeight(.medium)
-                                            .foregroundStyle(Color.profitLossColor(change))
-                                    }
-                                }
+                            LazyVGrid(columns: [
+                                GridItem(.flexible(), spacing: 8),
+                                GridItem(.flexible(), spacing: 8),
+                                GridItem(.flexible(), spacing: 8)
+                            ], spacing: 10) {
+                                expandedMetricCell(title: "市值", value: String(format: "$%.0f", marketValue), color: AppColor.textMain)
+                                expandedMetricCell(title: "成本", value: String(format: "$%.0f", group.totalInvested), color: AppColor.textMain)
+                                expandedMetricCell(
+                                    title: "損益",
+                                    value: String(format: "%@$%.0f", plVal >= 0 ? "+" : "", plVal),
+                                    subtitle: String(format: "%@%.1f%%", pctVal >= 0 ? "+" : "", pctVal),
+                                    color: Color.profitLossColor(plVal)
+                                )
                             }
+                            .padding(.horizontal, 14)
 
-                            // 市值 & 損益列
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("市值")
-                                        .font(.warmCaption2())
-                                        .foregroundStyle(AppColor.textSecondary)
-                                    Text(String(format: "$%.0f", marketValue))
-                                        .font(.warmCaption())
-                                        .fontWeight(.medium)
-                                        .foregroundStyle(AppColor.textMain)
-                                }
-                                Spacer()
-                                VStack(alignment: .center, spacing: 2) {
-                                    Text("成本")
-                                        .font(.warmCaption2())
-                                        .foregroundStyle(AppColor.textSecondary)
-                                    Text(String(format: "$%.0f", group.totalInvested))
-                                        .font(.warmCaption())
-                                        .fontWeight(.medium)
-                                        .foregroundStyle(AppColor.textMain)
-                                }
-                                Spacer()
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Text("未實現損益")
-                                        .font(.warmCaption2())
-                                        .foregroundStyle(AppColor.textSecondary)
-                                    Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f") (\(pct >= 0 ? "+" : "")\(pct, specifier: "%.1f")%)")
-                                        .font(.warmCaption())
-                                        .fontWeight(.bold)
-                                        .foregroundStyle(Color.profitLossColor(pl))
-                                }
-                            }
-
-                            // 本日損益增減（單一標的）
+                            // 本日增減
                             if let dailyChange = vm.dailyPLChange(for: group.ticker, quantity: group.totalQuantity) {
-                                AppColor.divider.frame(height: 1)
-                                HStack {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "chart.line.uptrend.xyaxis")
-                                            .font(.warmCaption2())
-                                            .foregroundStyle(AppColor.secondary)
-                                        Text("本日增減")
-                                            .font(.warmCaption2())
-                                            .foregroundStyle(AppColor.textSecondary)
-                                    }
+                                HStack(spacing: 6) {
+                                    Image(systemName: "chart.line.uptrend.xyaxis")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(AppColor.secondary)
+                                    Text("本日增減")
+                                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                                        .foregroundStyle(AppColor.textSecondary)
                                     Spacer()
-                                    Text("\(dailyChange >= 0 ? "+" : "")$\(dailyChange, specifier: "%.0f")")
-                                        .font(.warmCaption())
-                                        .fontWeight(.bold)
+                                    Text(String(format: "%@$%.0f", dailyChange >= 0 ? "+" : "", dailyChange))
+                                        .font(.system(size: 11, weight: .bold, design: .rounded))
                                         .foregroundStyle(Color.profitLossColor(dailyChange))
                                 }
+                                .padding(.horizontal, 14)
                             }
 
                             // 移動停利建議
-                            trailingStopBanner(ticker: group.ticker, currentPrice: price)
+                            trailingStopBanner(ticker: group.ticker, currentPrice: price, avgCost: group.weightedAverageCost)
+                                .padding(.horizontal, 14)
                         }
-                        .padding(10)
-                        .background(Color.profitLossColor(pl).opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                        // 法人買賣超摘要
+                        if let inst = vm.institutionalData[group.ticker] {
+                            institutionalBanner(inst)
+                                .padding(.horizontal, 14)
+                        }
+
+                        // 操作列：現價輸入 + 按鈕
+                        HStack(spacing: 8) {
+                            // 現價手動修正
+                            HStack(spacing: 6) {
+                                Image(systemName: "pencil.line")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(AppColor.primary)
+                                TextField(
+                                    "現價",
+                                    text: Binding(
+                                        get: { vm.priceBinding(for: group.ticker) },
+                                        set: { vm.setPrice($0, for: group.ticker) }
+                                    )
+                                )
+                                .keyboardType(.decimalPad)
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(AppColor.background)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .frame(maxWidth: 110)
+
+                            Spacer()
+
+                            // 個股分析
+                            Button { vm.openStockDetail(group) } label: {
+                                Label("分析", systemImage: "chart.xyaxis.line")
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .foregroundStyle(AppColor.primary)
+                                    .background(AppColor.primary.opacity(0.10))
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+
+                            // 盤中分析
+                            NavigationLink(destination: IntradayAnalysisView(symbol: group.ticker)) {
+                                Text("盤中")
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .foregroundStyle(AppColor.secondary)
+                                    .background(AppColor.secondary.opacity(0.10))
+                                    .clipShape(Capsule())
+                            }
+
+                            // 整批賣出
+                            Button { vm.selectGroupForSell(group) } label: {
+                                Text("賣出")
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .foregroundStyle(AppColor.softUp)
+                                    .background(AppColor.softUp.opacity(0.10))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        .padding(.horizontal, 14)
+
+                        // 買入明細
+                        VStack(spacing: 6) {
+                            ForEach(group.investments) { investment in
+                                detailRow(for: investment, currentPrice: currentPrice)
+                                    .contextMenu {
+                                        Button(role: .destructive) {
+                                            vm.confirmDelete(investment)
+                                        } label: {
+                                            Label("刪除紀錄", systemImage: "trash")
+                                        }
+                                    }
+                            }
+                        }
                         .padding(.horizontal, 14)
                     }
-
-                    // 法人買賣超摘要
-                    if let inst = vm.institutionalData[group.ticker] {
-                        institutionalBanner(inst)
-                            .padding(.horizontal, 14)
-                    }
-
-                    // 資訊徽章列
-                    HStack {
-                        WarmInfoBadge(title: "均價", value: String(format: "$%.2f", group.weightedAverageCost))
-                        Spacer()
-                        WarmInfoBadge(title: "筆數", value: "\(group.investments.count) 筆")
-                        Spacer()
-                        WarmInfoBadge(title: "持有", value: "\(group.holdingDays) 天")
-                    }
-                    .padding(.horizontal, 14)
-
-                    // 現價手動修正 & 整批賣出
-                    HStack(spacing: 10) {
-                        Image(systemName: "pencil.and.list.clipboard")
-                            .font(.warmCaption())
-                            .foregroundStyle(AppColor.primary)
-                        Text("現價")
-                            .font(.warmCaption())
-                            .foregroundStyle(AppColor.textSecondary)
-                        TextField(
-                            "手動輸入",
-                            text: Binding(
-                                get: { vm.priceBinding(for: group.ticker) },
-                                set: { vm.setPrice($0, for: group.ticker) }
-                            )
-                        )
-                        .keyboardType(.decimalPad)
-                        .font(.warmBody())
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(AppColor.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .frame(maxWidth: 100)
-                        Spacer()
-
-                        // 盤中分析
-                        NavigationLink(destination: IntradayAnalysisView(symbol: group.ticker)) {
-                            Text("盤中")
-                                .font(.warmCaption2())
-                                .fontWeight(.medium)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .foregroundStyle(AppColor.secondary)
-                                .background(AppColor.secondary.opacity(0.12))
-                                .clipShape(Capsule())
-                        }
-
-                        // 整批賣出
-                        Button {
-                            vm.selectGroupForSell(group)
-                        } label: {
-                            Text("整批賣出")
-                                .font(.warmCaption2())
-                                .fontWeight(.medium)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .foregroundStyle(AppColor.softUp)
-                                .background(AppColor.softUp.opacity(0.12))
-                                .clipShape(Capsule())
-                        }
-                    }
-                    .padding(.horizontal, 14)
-
-                    // 買入明細
-                    VStack(spacing: 6) {
-                        ForEach(group.investments) { investment in
-                            detailRow(for: investment, currentPrice: currentPrice)
-                                .contextMenu {
-                                    Button(role: .destructive) {
-                                        vm.confirmDelete(investment)
-                                    } label: {
-                                        Label("刪除紀錄", systemImage: "trash")
-                                    }
-                                }
-                        }
-                    }
-                    .padding(.horizontal, 14)
+                    .padding(.bottom, 14)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
-                .padding(.bottom, 14)
-                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .background(AppColor.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
+
+    /// 展開區塊的數據格子
+    private func expandedMetricCell(title: String, value: String, subtitle: String? = nil, color: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(title)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(AppColor.textSecondary)
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(color.opacity(0.8))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(AppColor.background.opacity(0.6))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     // MARK: - 展開後的單筆紀錄
@@ -854,10 +837,12 @@ struct PortfolioListView: View {
     // MARK: - 移動停利建議橫幅
 
     @ViewBuilder
-    private func trailingStopBanner(ticker: String, currentPrice: Double) -> some View {
+    private func trailingStopBanner(ticker: String, currentPrice: Double, avgCost: Double) -> some View {
         if let high = vm.highSinceBuy[ticker], high > 0 {
             let pct = TradingFeeSettings.load().trailingStopPct
-            let stopPrice = high * (1 - pct / 100)
+            let rawStop = high * (1 - pct / 100)
+            // 停利線不低於買入均價（保本下限）
+            let stopPrice = max(rawStop, avgCost)
             let drawdownPct = (high - currentPrice) / high * 100
 
             AppColor.divider.frame(height: 1)
@@ -907,9 +892,9 @@ struct PortfolioListView: View {
     /// 信號膠囊標籤
     private func signalPill(_ text: String, color: Color, filled: Bool = false) -> some View {
         Text(text)
-            .font(.system(size: 9, weight: .medium, design: .rounded))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
+            .font(.system(size: 10, weight: .medium, design: .rounded))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
             .background(filled ? color : color.opacity(0.12))
             .foregroundStyle(filled ? .white : color)
             .clipShape(Capsule())

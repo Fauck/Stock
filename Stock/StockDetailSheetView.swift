@@ -55,7 +55,7 @@ struct StockDetailSheetView: View {
 
                         // 移動停利建議
                         if let price = currentPrice, let high = highSinceBuy, high > 0 {
-                            trailingStopSection(currentPrice: price, highSinceBuy: high)
+                            trailingStopSection(currentPrice: price, highSinceBuy: high, avgCost: group.weightedAverageCost)
                         }
 
                         // 法人買賣超
@@ -339,10 +339,12 @@ struct StockDetailSheetView: View {
 
     // MARK: - 移動停利建議
 
-    private func trailingStopSection(currentPrice: Double, highSinceBuy high: Double) -> some View {
+    private func trailingStopSection(currentPrice: Double, highSinceBuy high: Double, avgCost: Double) -> some View {
         let fees = TradingFeeSettings.load()
         let pct = fees.trailingStopPct
-        let stopPrice = high * (1 - pct / 100)
+        let rawStop = high * (1 - pct / 100)
+        // 停利線不低於買入均價（保本下限）
+        let stopPrice = max(rawStop, avgCost)
         let drawdownPct = (high - currentPrice) / high * 100
         let marginPct = (currentPrice - stopPrice) / stopPrice * 100
 

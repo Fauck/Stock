@@ -60,9 +60,13 @@ final class PortfolioListViewModel {
     var showingDeleteAlert: Bool = false
 
     private var fetchTask: Task<Void, Never>?
-    private var signalTask: Task<Void, Never>?
-    private var weekStatsTask: Task<Void, Never>?
-    private var institutionalTask: Task<Void, Never>?
+    private var loadDataTask: Task<Void, Never>?
+
+    // MARK: - 快取鍵
+    private static let weekStatsCacheKey = "weekStatsCache"
+    private static let weekStatsCacheDateKey = "weekStatsCacheDate"
+    private static let institutionalCacheKey = "institutionalCache"
+    private static let institutionalCacheDateKey = "institutionalCacheDate"
 
     // MARK: - Computed
 
@@ -216,249 +220,342 @@ final class PortfolioListViewModel {
         }
     }
 
-    // MARK: - 技術指標載入
+    // MARK: - 統一載入（分優先級）
 
-    /// 批次載入所有持有標的的技術指標信號
-    /// 需要歷史 K 線資料（最近 30 個交易日 ≈ 45 日曆日）
-    func fetchTechnicalSignals() {
-        let tickers = groups.map(\.ticker)
-        guard !tickers.isEmpty else { return }
-
-        signalTask?.cancel()
-        signalTask = Task { @MainActor in
-            isFetchingSignals = true
-            let settings = TechnicalSettings.load()
-
-            let calendar = Calendar.current
-            let today = Date()
-            let fromDate = calendar.date(byAdding: .day, value: -60, to: today) ?? today
-
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd"
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            let fromStr = formatter.string(from: fromDate)
-            let toStr = formatter.string(from: today)
-
-            // 預先解析代號（MainActor 上）
-            var tickerSymbols: [(String, String)] = []
-            for ticker in tickers {
-                let symbol = StockMapping.resolve(ticker).symbol
-                tickerSymbols.append((ticker, symbol))
-            }
-
-            // 定義回傳型別
-            struct CandleResult: Sendable {
-                let ticker: String
-                let dates: [String]
-                let closes: [Double]
-                let highs: [Double]
-                let lows: [Double]
-                let volumes: [Int]
-            }
-
-            // 並行取得歷史資料
-            let results = await withTaskGroup(of: CandleResult?.self) { group in
-                for (ticker, symbol) in tickerSymbols {
-                    group.addTask {
-                        do {
-                            let response = try await StockService.shared.fetchHistoricalCandles(
-                                symbol: symbol, from: fromStr, to: toStr
-                            )
-                            let sorted = response.data.sorted { $0.date < $1.date }
-                            return CandleResult(
-                                ticker: ticker,
-                                dates: sorted.map(\.date),
-                                closes: sorted.map(\.close),
-                                highs: sorted.map(\.high),
-                                lows: sorted.map(\.low),
-                                volumes: sorted.map(\.volume)
-                            )
-                        } catch {
-                            return nil
-                        }
-                    }
-                }
-                var collected: [CandleResult] = []
-                for await result in group {
-                    if let result { collected.append(result) }
-                }
-                return collected
-            }
-
-            // 在 MainActor 上計算信號 + 買入後最高價
-            let buyDateFormatter = DateFormatter()
-            buyDateFormatter.dateFormat = "yyyy-MM-dd"
-            buyDateFormatter.locale = Locale(identifier: "en_US_POSIX")
-
-            // 建立 ticker → 最早買入日映射
-            var earliestBuyDates: [String: String] = [:]
-            for group in groups {
-                if let earliest = group.investments.map(\.buyDate).min() {
-                    earliestBuyDates[group.ticker] = buyDateFormatter.string(from: earliest)
-                }
-            }
-
-            for result in results {
-                let summary = TechnicalIndicators.computeSignalSummary(
-                    closes: result.closes, highs: result.highs, lows: result.lows,
-                    volumes: result.volumes,
-                    settings: settings
-                )
-                technicalSignals[result.ticker] = summary
-
-                // 計算買入後最高價
-                if let buyDateStr = earliestBuyDates[result.ticker] {
-                    var maxHigh: Double = 0
-                    for (i, date) in result.dates.enumerated() where date >= buyDateStr {
-                        maxHigh = max(maxHigh, result.highs[i])
-                    }
-                    // 如果 K 線都在買入日之前（持有超過 60 天），用全部 highs 的 max
-                    if maxHigh == 0, let allMax = result.highs.max() {
-                        maxHigh = allMax
-                    }
-                    // 與當前即時價比較，取較大者
-                    if let price = currentPrice(for: result.ticker) {
-                        maxHigh = max(maxHigh, price)
-                    }
-                    if maxHigh > 0 {
-                        highSinceBuy[result.ticker] = maxHigh
-                    }
-                }
-            }
+    /// 分優先級載入所有資料：
+    /// 1. 即時報價（最高優先，影響卡片核心數字）
+    /// 2. 即時價完成後 → 技術指標 + 52 週統計 + 法人 並行載入
+    /// forceRefresh = true 時會忽略快取
+    func loadData(forceRefresh: Bool = false) {
+        loadDataTask?.cancel()
+        loadDataTask = Task { @MainActor in
+            // Phase 1：即時報價
+            await fetchAllPricesAsync()
 
             guard !Task.isCancelled else { return }
-            isFetchingSignals = false
+
+            // Phase 2：次要資料並行載入
+            async let signalsTask: () = fetchTechnicalSignalsAsync()
+            async let weekTask: () = fetchWeekStatsIfNeeded(forceRefresh: forceRefresh)
+            async let instTask: () = fetchInstitutionalIfNeeded(forceRefresh: forceRefresh)
+            _ = await (signalsTask, weekTask, instTask)
         }
     }
 
-    // MARK: - 52 週統計載入
-
-    /// 批次載入所有持有標的的 52 週高低點
-    func fetchWeekStats() {
+    /// 可 await 的即時報價載入
+    private func fetchAllPricesAsync() async {
         let tickers = groups.map(\.ticker)
         guard !tickers.isEmpty else { return }
 
-        weekStatsTask?.cancel()
-        weekStatsTask = Task { @MainActor in
-            isFetchingWeekStats = true
+        isFetchingPrices = true
 
-            // 預先解析代號（MainActor 上）
-            var tickerSymbols: [(String, String)] = []
-            for ticker in tickers {
-                let symbol = StockMapping.resolve(ticker).symbol
-                tickerSymbols.append((ticker, symbol))
-            }
-
-            struct StatsResult: Sendable {
-                let ticker: String
-                let high52w: Double
-                let low52w: Double
-            }
-
-            let results = await withTaskGroup(of: StatsResult?.self) { group in
-                for (ticker, symbol) in tickerSymbols {
-                    group.addTask {
-                        do {
-                            let response = try await StockService.shared.fetchStats(symbol: symbol)
-                            guard let high = response.week52High, let low = response.week52Low,
-                                  high > 0, low > 0 else { return nil }
-                            return StatsResult(ticker: ticker, high52w: high, low52w: low)
-                        } catch {
-                            return nil
-                        }
-                    }
-                }
-                var collected: [StatsResult] = []
-                for await result in group {
-                    if let result { collected.append(result) }
-                }
-                return collected
-            }
-
-            for result in results {
-                weekStats[result.ticker] = WeekStats(high52w: result.high52w, low52w: result.low52w)
-            }
-
-            guard !Task.isCancelled else { return }
-            isFetchingWeekStats = false
+        var tickerToSymbol: [String: String] = [:]
+        for ticker in tickers {
+            let resolved = StockMapping.resolve(ticker)
+            tickerToSymbol[ticker] = resolved.symbol
         }
+
+        let apiSymbols = Array(Set(tickerToSymbol.values))
+        let results = await StockService.shared.fetchQuotes(symbols: apiSymbols)
+
+        guard !Task.isCancelled else { return }
+
+        for (ticker, apiSymbol) in tickerToSymbol {
+            if let result = results[apiSymbol] {
+                currentPrices[ticker] = String(format: "%.2f", result.lastPrice)
+                if let prevClose = result.previousClose, prevClose > 0 {
+                    previousClosePrices[ticker] = prevClose
+                }
+                if let change = result.change {
+                    dailyChangePoints[ticker] = change
+                }
+                if let changePct = result.changePercent {
+                    dailyChangePercents[ticker] = changePct
+                }
+                let cleanName = result.name.replacingOccurrences(of: "*", with: "")
+                stockNames[ticker] = cleanName
+                StockMapping.cache(symbol: apiSymbol, name: result.name)
+            }
+        }
+        isFetchingPrices = false
     }
 
-    // MARK: - 三大法人買賣超載入
-
-    /// 批次載入持有標的的三大法人買賣超（最近 5 個交易日）
-    func fetchInstitutionalData() {
+    /// 可 await 的技術指標載入
+    private func fetchTechnicalSignalsAsync() async {
         let tickers = groups.map(\.ticker)
         guard !tickers.isEmpty else { return }
 
-        institutionalTask?.cancel()
-        institutionalTask = Task { @MainActor in
-            isFetchingInstitutional = true
+        isFetchingSignals = true
+        let settings = TechnicalSettings.load()
 
-            // 取得持有標的的股票代號（純數字代號，用於 TWSE 查詢）
-            var tickerToCode: [String: String] = [:]
-            for ticker in tickers {
-                let resolved = StockMapping.resolve(ticker)
-                tickerToCode[ticker] = resolved.symbol
+        let calendar = Calendar.current
+        let today = Date()
+        let defaultFromDate = calendar.date(byAdding: .day, value: -60, to: today) ?? today
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let defaultFromStr = formatter.string(from: defaultFromDate)
+        let toStr = formatter.string(from: today)
+
+        var tickerSymbols: [(ticker: String, symbol: String, fromStr: String)] = []
+        for ticker in tickers {
+            let symbol = StockMapping.resolve(ticker).symbol
+            var fromStr = defaultFromStr
+            if let group = groups.first(where: { $0.ticker == ticker }),
+               let earliest = group.investments.map(\.buyDate).min() {
+                let earliestStr = formatter.string(from: earliest)
+                if earliestStr < defaultFromStr {
+                    fromStr = earliestStr
+                }
             }
+            tickerSymbols.append((ticker, symbol, fromStr))
+        }
 
-            // 產生最近 14 個日曆日（倒序），確保涵蓋至少 5 個交易日（含長假）
-            let calendar = Calendar.current
-            let today = Date()
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyyMMdd"
-            formatter.locale = Locale(identifier: "en_US_POSIX")
+        struct CandleResult: Sendable {
+            let ticker: String
+            let dates: [String]
+            let closes: [Double]
+            let highs: [Double]
+            let lows: [Double]
+            let volumes: [Int]
+        }
 
-            var datesToFetch: [String] = []
-            for i in 0..<14 {
-                if let d = calendar.date(byAdding: .day, value: -i, to: today) {
+        let results = await withTaskGroup(of: CandleResult?.self) { group in
+            for (ticker, symbol, tickerFromStr) in tickerSymbols {
+                group.addTask {
+                    do {
+                        let response = try await StockService.shared.fetchHistoricalCandles(
+                            symbol: symbol, from: tickerFromStr, to: toStr
+                        )
+                        let sorted = response.data.sorted { $0.date < $1.date }
+                        return CandleResult(
+                            ticker: ticker,
+                            dates: sorted.map(\.date),
+                            closes: sorted.map(\.close),
+                            highs: sorted.map(\.high),
+                            lows: sorted.map(\.low),
+                            volumes: sorted.map(\.volume)
+                        )
+                    } catch {
+                        return nil
+                    }
+                }
+            }
+            var collected: [CandleResult] = []
+            for await result in group {
+                if let result { collected.append(result) }
+            }
+            return collected
+        }
+
+        var earliestBuyDates: [String: String] = [:]
+        for group in groups {
+            if let earliest = group.investments.map(\.buyDate).min() {
+                earliestBuyDates[group.ticker] = formatter.string(from: earliest)
+            }
+        }
+
+        for result in results {
+            let summary = TechnicalIndicators.computeSignalSummary(
+                closes: result.closes, highs: result.highs, lows: result.lows,
+                volumes: result.volumes,
+                settings: settings
+            )
+            technicalSignals[result.ticker] = summary
+
+            if let buyDateStr = earliestBuyDates[result.ticker] {
+                var maxHigh: Double = 0
+                for (i, date) in result.dates.enumerated() where date >= buyDateStr {
+                    maxHigh = max(maxHigh, result.highs[i])
+                }
+                if maxHigh == 0, let allMax = result.highs.max() {
+                    maxHigh = allMax
+                }
+                if let price = currentPrice(for: result.ticker) {
+                    maxHigh = max(maxHigh, price)
+                }
+                if maxHigh > 0 {
+                    highSinceBuy[result.ticker] = maxHigh
+                }
+            }
+        }
+
+        guard !Task.isCancelled else { return }
+        isFetchingSignals = false
+    }
+
+    /// 52 週統計（帶當日快取）
+    private func fetchWeekStatsIfNeeded(forceRefresh: Bool) async {
+        let tickers = groups.map(\.ticker)
+        guard !tickers.isEmpty else { return }
+
+        let todayStr = Self.todayString()
+
+        // 嘗試讀取快取
+        if !forceRefresh,
+           let cachedDate = UserDefaults.standard.string(forKey: Self.weekStatsCacheDateKey),
+           cachedDate == todayStr,
+           let data = UserDefaults.standard.data(forKey: Self.weekStatsCacheKey),
+           let cached = try? JSONDecoder().decode([String: CodableWeekStats].self, from: data) {
+            for (ticker, stats) in cached {
+                weekStats[ticker] = WeekStats(high52w: stats.high, low52w: stats.low)
+            }
+            return
+        }
+
+        isFetchingWeekStats = true
+
+        var tickerSymbols: [(String, String)] = []
+        for ticker in tickers {
+            let symbol = StockMapping.resolve(ticker).symbol
+            tickerSymbols.append((ticker, symbol))
+        }
+
+        struct StatsResult: Sendable {
+            let ticker: String
+            let high52w: Double
+            let low52w: Double
+        }
+
+        let results = await withTaskGroup(of: StatsResult?.self) { group in
+            for (ticker, symbol) in tickerSymbols {
+                group.addTask {
+                    do {
+                        let response = try await StockService.shared.fetchStats(symbol: symbol)
+                        guard let high = response.week52High, let low = response.week52Low,
+                              high > 0, low > 0 else { return nil }
+                        return StatsResult(ticker: ticker, high52w: high, low52w: low)
+                    } catch {
+                        return nil
+                    }
+                }
+            }
+            var collected: [StatsResult] = []
+            for await result in group {
+                if let result { collected.append(result) }
+            }
+            return collected
+        }
+
+        var cacheDict: [String: CodableWeekStats] = [:]
+        for result in results {
+            weekStats[result.ticker] = WeekStats(high52w: result.high52w, low52w: result.low52w)
+            cacheDict[result.ticker] = CodableWeekStats(high: result.high52w, low: result.low52w)
+        }
+
+        // 寫入快取
+        if let encoded = try? JSONEncoder().encode(cacheDict) {
+            UserDefaults.standard.set(encoded, forKey: Self.weekStatsCacheKey)
+            UserDefaults.standard.set(todayStr, forKey: Self.weekStatsCacheDateKey)
+        }
+
+        guard !Task.isCancelled else { return }
+        isFetchingWeekStats = false
+    }
+
+    /// 法人買賣超（帶當日快取 + 排除週末）
+    private func fetchInstitutionalIfNeeded(forceRefresh: Bool) async {
+        let tickers = groups.map(\.ticker)
+        guard !tickers.isEmpty else { return }
+
+        let todayStr = Self.todayString()
+
+        // 嘗試讀取快取
+        if !forceRefresh,
+           let cachedDate = UserDefaults.standard.string(forKey: Self.institutionalCacheDateKey),
+           cachedDate == todayStr,
+           let data = UserDefaults.standard.data(forKey: Self.institutionalCacheKey),
+           let cached = try? JSONDecoder().decode([String: CodableInstitutionalSummary].self, from: data) {
+            for (ticker, summary) in cached {
+                institutionalData[ticker] = summary.toSummary()
+            }
+            return
+        }
+
+        isFetchingInstitutional = true
+
+        var tickerToCode: [String: String] = [:]
+        for ticker in tickers {
+            let resolved = StockMapping.resolve(ticker)
+            tickerToCode[ticker] = resolved.symbol
+        }
+
+        // 產生最近的工作日日期（排除週末），最多取 10 個工作日
+        let calendar = Calendar.current
+        let today = Date()
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+
+        var datesToFetch: [String] = []
+        var dayOffset = 0
+        while datesToFetch.count < 10 && dayOffset < 20 {
+            if let d = calendar.date(byAdding: .day, value: -dayOffset, to: today) {
+                let weekday = calendar.component(.weekday, from: d)
+                // 1 = 週日, 7 = 週六
+                if weekday != 1 && weekday != 7 {
                     datesToFetch.append(formatter.string(from: d))
                 }
             }
-
-            // 並行呼叫多日 TWSE API
-            let allDayResults = await withTaskGroup(
-                of: (String, [String: StockService.InstitutionalDayData]?).self
-            ) { group in
-                for dateStr in datesToFetch {
-                    group.addTask {
-                        do {
-                            let data = try await StockService.shared.fetchInstitutionalData(date: dateStr)
-                            return (dateStr, data)
-                        } catch {
-                            return (dateStr, nil)
-                        }
-                    }
-                }
-                var collected: [(String, [String: StockService.InstitutionalDayData])] = []
-                for await (dateStr, data) in group {
-                    if let data { collected.append((dateStr, data)) }
-                }
-                // 按日期倒序（新→舊）
-                return collected.sorted { $0.0 > $1.0 }
-            }
-
-            guard !Task.isCancelled else { return }
-
-            // 取最多 5 個有效交易日
-            let tradingDays = Array(allDayResults.prefix(5))
-
-            // 針對每個持有 ticker 組裝 InstitutionalSummary
-            for (ticker, code) in tickerToCode {
-                var days: [StockService.InstitutionalDayData] = []
-                for (_, dayMap) in tradingDays {
-                    if let dayData = dayMap[code] {
-                        days.append(dayData)
-                    }
-                }
-                if !days.isEmpty {
-                    institutionalData[ticker] = StockService.InstitutionalSummary(days: days)
-                }
-            }
-
-            guard !Task.isCancelled else { return }
-            isFetchingInstitutional = false
+            dayOffset += 1
         }
+
+        let allDayResults = await withTaskGroup(
+            of: (String, [String: StockService.InstitutionalDayData]?).self
+        ) { group in
+            for dateStr in datesToFetch {
+                group.addTask {
+                    do {
+                        let data = try await StockService.shared.fetchInstitutionalData(date: dateStr)
+                        return (dateStr, data)
+                    } catch {
+                        return (dateStr, nil)
+                    }
+                }
+            }
+            var collected: [(String, [String: StockService.InstitutionalDayData])] = []
+            for await (dateStr, data) in group {
+                if let data { collected.append((dateStr, data)) }
+            }
+            return collected.sorted { $0.0 > $1.0 }
+        }
+
+        guard !Task.isCancelled else { return }
+
+        let tradingDays = Array(allDayResults.prefix(5))
+
+        var cacheDict: [String: CodableInstitutionalSummary] = [:]
+        for (ticker, code) in tickerToCode {
+            var days: [StockService.InstitutionalDayData] = []
+            for (_, dayMap) in tradingDays {
+                if let dayData = dayMap[code] {
+                    days.append(dayData)
+                }
+            }
+            if !days.isEmpty {
+                let summary = StockService.InstitutionalSummary(days: days)
+                institutionalData[ticker] = summary
+                cacheDict[ticker] = CodableInstitutionalSummary(from: summary)
+            }
+        }
+
+        // 寫入快取
+        if let encoded = try? JSONEncoder().encode(cacheDict) {
+            UserDefaults.standard.set(encoded, forKey: Self.institutionalCacheKey)
+            UserDefaults.standard.set(todayStr, forKey: Self.institutionalCacheDateKey)
+        }
+
+        guard !Task.isCancelled else { return }
+        isFetchingInstitutional = false
+    }
+
+    /// 今天日期字串（用於快取判斷）
+    private static func todayString() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f.string(from: Date())
     }
 
     // MARK: - Actions
@@ -494,3 +591,40 @@ final class PortfolioListViewModel {
         AppDateFormatter.slashDate.string(from: date)
     }
 }
+// MARK: - Codable 快取結構
+
+/// 52 週統計快取用
+private struct CodableWeekStats: Codable {
+    let high: Double
+    let low: Double
+}
+
+/// 法人買賣超快取用
+private struct CodableInstitutionalSummary: Codable {
+    let days: [CodableDayData]
+
+    struct CodableDayData: Codable {
+        let date: String
+        let foreignNet: Int
+        let trustNet: Int
+        let dealerNet: Int
+        let totalNet: Int
+    }
+
+    init(from summary: StockService.InstitutionalSummary) {
+        self.days = summary.days.map {
+            CodableDayData(date: $0.date, foreignNet: $0.foreignNet, trustNet: $0.trustNet,
+                           dealerNet: $0.dealerNet, totalNet: $0.totalNet)
+        }
+    }
+
+    func toSummary() -> StockService.InstitutionalSummary {
+        let converted = days.map {
+            StockService.InstitutionalDayData(date: $0.date, foreignNet: $0.foreignNet,
+                                               trustNet: $0.trustNet, dealerNet: $0.dealerNet,
+                                               totalNet: $0.totalNet)
+        }
+        return StockService.InstitutionalSummary(days: converted)
+    }
+}
+
