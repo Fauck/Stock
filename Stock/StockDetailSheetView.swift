@@ -15,6 +15,7 @@ struct StockDetailSheetView: View {
     let displayName: String
     let highSinceBuy: Double?
     let institutionalData: StockService.InstitutionalSummary?
+    let sellRecommendation: TechnicalIndicators.SellRecommendation?
 
     @Environment(\.dismiss) private var dismiss
     @State private var chartVM: KLineChartViewModel
@@ -26,7 +27,8 @@ struct StockDetailSheetView: View {
         currentPrice: Double?,
         displayName: String,
         highSinceBuy: Double? = nil,
-        institutionalData: StockService.InstitutionalSummary? = nil
+        institutionalData: StockService.InstitutionalSummary? = nil,
+        sellRecommendation: TechnicalIndicators.SellRecommendation? = nil
     ) {
         self.group = group
         self.signal = signal
@@ -35,6 +37,7 @@ struct StockDetailSheetView: View {
         self.displayName = displayName
         self.highSinceBuy = highSinceBuy
         self.institutionalData = institutionalData
+        self.sellRecommendation = sellRecommendation
         self._chartVM = State(initialValue: KLineChartViewModel(group: group))
     }
 
@@ -53,6 +56,12 @@ struct StockDetailSheetView: View {
                             technicalSignalSection(signal)
                         }
 
+                        // 賣出建議
+                        if let rec = sellRecommendation {
+                            sellRecommendationSection(rec)
+                        }
+
+                       
                         // 移動停利建議
                         if let price = currentPrice, let high = highSinceBuy, high > 0 {
                             trailingStopSection(currentPrice: price, highSinceBuy: high, avgCost: group.weightedAverageCost)
@@ -68,6 +77,12 @@ struct StockDetailSheetView: View {
                            stats.high52w > stats.low52w {
                             weekStatsSection(stats)
                         }
+                        // 壓力/支撐價位
+                        if TradingFeeSettings.load().supportResistanceEnabled,
+                           let signal, let price = currentPrice {
+                            supportResistanceSection(signal: signal, currentPrice: price)
+                        }
+
                     }
                     .padding(.horizontal)
                     .padding(.vertical, 12)
@@ -157,19 +172,19 @@ struct StockDetailSheetView: View {
                 if let ma5 = signal.ma5Position {
                     signalPill(
                         ma5 == .above ? "MA5↑" : "MA5↓",
-                        color: ma5 == .above ? AppColor.secondary : AppColor.softDown
+                        color: ma5 == .above ? AppColor.softUp : AppColor.softDown
                     )
                 }
                 if let ma20 = signal.ma20Position {
                     signalPill(
                         ma20 == .above ? "MA20↑" : "MA20↓",
-                        color: ma20 == .above ? AppColor.secondary : AppColor.softDown
+                        color: ma20 == .above ? AppColor.softUp : AppColor.softDown
                     )
                 }
                 if let maCross = signal.maCross {
                     signalPill(
                         maCross.label,
-                        color: maCross == .goldenCross ? AppColor.secondary : AppColor.softDown,
+                        color: maCross == .goldenCross ? AppColor.softUp : AppColor.softDown,
                         filled: true
                     )
                 }
@@ -202,7 +217,7 @@ struct StockDetailSheetView: View {
                     )
                 }
                 if let kdjSig = signal.kdjSignal, let label = kdjSig.label {
-                    signalPill(label, color: kdjSig == .goldenCross ? AppColor.secondary : AppColor.softDown, filled: true)
+                    signalPill(label, color: kdjSig == .goldenCross ? AppColor.softUp : AppColor.softDown, filled: true)
                 }
             }
 
@@ -211,15 +226,15 @@ struct StockDetailSheetView: View {
                 if let dif = signal.macdDIF, let dea = signal.macdDEA {
                     signalPill(
                         "DIF \(String(format: "%.2f", dif))",
-                        color: dif >= 0 ? AppColor.secondary : AppColor.softDown
+                        color: dif >= 0 ? AppColor.softUp : AppColor.softDown
                     )
                     signalPill(
                         "DEA \(String(format: "%.2f", dea))",
-                        color: dea >= 0 ? AppColor.secondary : AppColor.softDown
+                        color: dea >= 0 ? AppColor.softUp : AppColor.softDown
                     )
                 }
                 if let macdSig = signal.macdSignal, let label = macdSig.label {
-                    signalPill(label, color: macdSig == .goldenCross ? AppColor.secondary : AppColor.softDown, filled: true)
+                    signalPill(label, color: macdSig == .goldenCross ? AppColor.softUp : AppColor.softDown, filled: true)
                 }
             }
 
@@ -265,6 +280,108 @@ struct StockDetailSheetView: View {
         }
     }
 
+    // MARK: - 賣出建議卡片
+
+    private func sellRecommendationSection(_ rec: TechnicalIndicators.SellRecommendation) -> some View {
+        let level = rec.level
+        let levelColor: Color = {
+            switch level {
+            case .strongSell: return AppColor.softDown
+            case .considerSell: return .orange
+            case .neutral: return AppColor.textSecondary
+            case .holdBullish, .strongHold: return AppColor.softUp
+            }
+        }()
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 4) {
+                Image(systemName: "gauge.with.dots.needle.33percent")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("賣出建議")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            // 分數與等級
+            VStack(spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: level.icon)
+                        .font(.system(size: 16))
+                        .foregroundStyle(levelColor)
+                    Text(level.label)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(levelColor)
+                    Spacer()
+                    Text("\(rec.score)")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundStyle(levelColor)
+                    + Text(" / 100")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary)
+                }
+
+                // 進度條
+                GeometryReader { geo in
+                    let width = geo.size.width
+                    let fillWidth = width * CGFloat(rec.score) / 100
+
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(AppColor.divider)
+                            .frame(height: 6)
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(levelColor)
+                            .frame(width: max(0, fillWidth), height: 6)
+                    }
+                }
+                .frame(height: 6)
+            }
+            .padding(10)
+            .background(levelColor.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            // 因子列表
+            if !rec.factors.isEmpty {
+                let columns = [
+                    GridItem(.flexible(), spacing: 6),
+                    GridItem(.flexible(), spacing: 6)
+                ]
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 4) {
+                    ForEach(rec.factors) { factor in
+                        HStack(spacing: 4) {
+                            Image(systemName: factor.isBearish ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                                .font(.system(size: 7))
+                                .foregroundStyle(factor.isBearish ? AppColor.softDown : AppColor.softUp)
+                            Text(factor.name)
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                                .foregroundStyle(AppColor.textMain)
+                                .lineLimit(1)
+                            Spacer(minLength: 2)
+                            Text(factor.points > 0 ? "+\(factor.points)" : "\(factor.points)")
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .foregroundStyle(factor.isBearish ? AppColor.softDown : AppColor.softUp)
+                        }
+                    }
+                }
+            }
+
+            // 免責聲明
+            HStack(spacing: 4) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 9))
+                    .foregroundStyle(AppColor.textSecondary.opacity(0.6))
+                Text("此建議僅供參考，不構成投資建議")
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppColor.textSecondary.opacity(0.6))
+            }
+        }
+        .padding(12)
+        .background(AppColor.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
+
     // MARK: - 操作建議信號
 
     private struct ActionSignalItem: Hashable {
@@ -285,19 +402,19 @@ struct StockDetailSheetView: View {
 
         // 加碼信號（偏多）
         if let maCross = signal.maCross, maCross == .goldenCross {
-            items.append(ActionSignalItem(text: "均線金叉：短期均線上穿長期均線，趨勢轉多", icon: "arrow.up.circle.fill", color: AppColor.secondary))
+            items.append(ActionSignalItem(text: "均線金叉：短期均線上穿長期均線，趨勢轉多", icon: "arrow.up.circle.fill", color: AppColor.softUp))
         }
         if let macdSig = signal.macdSignal, macdSig == .goldenCross {
-            items.append(ActionSignalItem(text: "MACD 金叉：DIF 上穿 DEA，動能轉強", icon: "arrow.up.circle.fill", color: AppColor.secondary))
+            items.append(ActionSignalItem(text: "MACD 金叉：DIF 上穿 DEA，動能轉強", icon: "arrow.up.circle.fill", color: AppColor.softUp))
         }
         if let kdjSig = signal.kdjSignal, kdjSig == .goldenCross {
-            items.append(ActionSignalItem(text: "KD 金叉：短線動能回升，可留意加碼", icon: "arrow.up.circle.fill", color: AppColor.secondary))
+            items.append(ActionSignalItem(text: "KD 金叉：短線動能回升，可留意加碼", icon: "arrow.up.circle.fill", color: AppColor.softUp))
         }
         if let rsiSig = signal.rsiSignal, rsiSig == .oversold {
-            items.append(ActionSignalItem(text: "RSI 超賣：短線或已超跌，注意反彈機會", icon: "arrow.up.circle.fill", color: AppColor.secondary))
+            items.append(ActionSignalItem(text: "RSI 超賣：短線或已超跌，注意反彈機會", icon: "arrow.up.circle.fill", color: AppColor.softUp))
         }
         if let bbSig = signal.bollingerSignal, bbSig == .nearLower {
-            items.append(ActionSignalItem(text: "觸及布林下軌：價格接近支撐帶，留意止跌反彈", icon: "arrow.up.circle.fill", color: AppColor.secondary))
+            items.append(ActionSignalItem(text: "觸及布林下軌：價格接近支撐帶，留意止跌反彈", icon: "arrow.up.circle.fill", color: AppColor.softUp))
         }
 
         // 壞出信號（偏空）
@@ -335,6 +452,123 @@ struct StockDetailSheetView: View {
         }
 
         return items
+    }
+
+    // MARK: - 壓力/支撐價位
+
+    /// 壓力/支撐項目
+    private struct SRLevel: Identifiable {
+        let id = UUID()
+        let label: String       // "MA5", "布林上軌" 等
+        let price: Double
+        let isResistance: Bool  // true=壓力, false=支撐
+    }
+
+    private func supportResistanceSection(signal: TechnicalIndicators.SignalSummary, currentPrice: Double) -> some View {
+        // 收集所有壓力/支撐價位
+        var levels: [SRLevel] = []
+
+        if let ma5 = signal.ma5Value {
+            levels.append(SRLevel(label: "MA5", price: ma5, isResistance: ma5 > currentPrice))
+        }
+        if let ma20 = signal.ma20Value {
+            levels.append(SRLevel(label: "MA20", price: ma20, isResistance: ma20 > currentPrice))
+        }
+        if let upper = signal.bollingerUpper {
+            levels.append(SRLevel(label: "布林上軌", price: upper, isResistance: true))
+        }
+        if let middle = signal.bollingerMiddle {
+            levels.append(SRLevel(label: "布林中軌", price: middle, isResistance: middle > currentPrice))
+        }
+        if let lower = signal.bollingerLower {
+            levels.append(SRLevel(label: "布林下軌", price: lower, isResistance: false))
+        }
+        if let high20 = signal.recentHigh20 {
+            levels.append(SRLevel(label: "近20日高", price: high20, isResistance: true))
+        }
+        if let low20 = signal.recentLow20 {
+            levels.append(SRLevel(label: "近20日低", price: low20, isResistance: false))
+        }
+        if let stats = weekStats {
+            if stats.high52w > 0 {
+                levels.append(SRLevel(label: "52W高", price: stats.high52w, isResistance: true))
+            }
+            if stats.low52w > 0 {
+                levels.append(SRLevel(label: "52W低", price: stats.low52w, isResistance: false))
+            }
+        }
+
+        // 分為壓力（高於現價）和支撐（低於現價），依距離排序
+        let resistanceLevels = levels
+            .filter { $0.price > currentPrice }
+            .sorted { $0.price < $1.price }  // 由近到遠
+        let supportLevels = levels
+            .filter { $0.price <= currentPrice }
+            .sorted { $0.price > $1.price }  // 由近到遠
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.up.and.down.text.horizontal")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("壓力 / 支撐")
+                    .font(.warmHeadline())
+                    .foregroundStyle(AppColor.textMain)
+            }
+
+            // 目前價格
+            HStack {
+                Text("目前價格")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+                Text(String(format: "%.2f", currentPrice))
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppColor.primary)
+            }
+            .padding(.bottom, 2)
+
+            // 壓力區
+            if !resistanceLevels.isEmpty {
+                srGroupView(title: "壓力", levels: resistanceLevels, currentPrice: currentPrice, isResistance: true)
+            }
+
+            // 支撐區
+            if !supportLevels.isEmpty {
+                srGroupView(title: "支撐", levels: supportLevels, currentPrice: currentPrice, isResistance: false)
+            }
+        }
+        .cardStyle()
+    }
+
+    private func srGroupView(title: String, levels: [SRLevel], currentPrice: Double, isResistance: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(isResistance ? AppColor.softUp : AppColor.softDown)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background((isResistance ? AppColor.softUp : AppColor.softDown).opacity(0.12))
+                .clipShape(Capsule())
+
+            ForEach(levels) { level in
+                HStack(spacing: 0) {
+                    Text(level.label)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary)
+                        .frame(width: 70, alignment: .leading)
+                    Spacer()
+                    Text(String(format: "%.2f", level.price))
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(isResistance ? AppColor.softUp : AppColor.softDown)
+                    let pct = (level.price - currentPrice) / currentPrice * 100
+                    Text(String(format: "%+.1f%%", pct))
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary)
+                        .frame(width: 55, alignment: .trailing)
+                }
+            }
+        }
     }
 
     // MARK: - 移動停利建議
@@ -529,13 +763,13 @@ struct StockDetailSheetView: View {
                     .font(.system(size: 9, weight: .semibold, design: .rounded))
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
-                    .background((streak > 0 ? AppColor.secondary : AppColor.softDown).opacity(0.15))
-                    .foregroundStyle(streak > 0 ? AppColor.secondary : AppColor.softDown)
+                    .background((streak > 0 ? AppColor.softUp : AppColor.softDown).opacity(0.15))
+                    .foregroundStyle(streak > 0 ? AppColor.softUp : AppColor.softDown)
                     .clipShape(Capsule())
             } else if streak != 0 {
                 Text(streak > 0 ? "買超" : "賣超")
                     .font(.system(size: 9, weight: .medium, design: .rounded))
-                    .foregroundStyle(streak > 0 ? AppColor.secondary : AppColor.softDown)
+                    .foregroundStyle(streak > 0 ? AppColor.softUp : AppColor.softDown)
             } else {
                 Text("—")
                     .font(.system(size: 9, weight: .medium, design: .rounded))

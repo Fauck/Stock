@@ -77,6 +77,16 @@ struct TechnicalSettingsView: View {
                 value: $feeSettings.trailingStopPct,
                 range: 5...30
             )
+            Divider()
+            toggleRow(
+                label: "賣出建議",
+                isOn: $feeSettings.sellRecommendationEnabled
+            )
+            Divider()
+            toggleRow(
+                label: "壓力/支撐價位",
+                isOn: $feeSettings.supportResistanceEnabled
+            )
         }
     }
 
@@ -125,6 +135,17 @@ struct TechnicalSettingsView: View {
                 .labelsHidden()
                 .onChange(of: value.wrappedValue) { feeSettings.save() }
         }
+    }
+
+    /// Toggle 開關列
+    private func toggleRow(label: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            Text(label)
+                .font(.warmBody())
+                .foregroundStyle(AppColor.textMain)
+        }
+        .tint(AppColor.primary)
+        .onChange(of: isOn.wrappedValue) { feeSettings.save() }
     }
 
     // MARK: - 均線

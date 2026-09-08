@@ -313,6 +313,16 @@ enum TechnicalIndicators {
         let macdDEA: Double?
         /// 布林通道信號
         let bollingerSignal: BollingerSignal?
+        /// 布林通道具體數值（壓力/支撐用）
+        let bollingerUpper: Double?
+        let bollingerMiddle: Double?
+        let bollingerLower: Double?
+        /// 均線具體數值（壓力/支撐用）
+        let ma5Value: Double?
+        let ma20Value: Double?
+        /// 近 20 日區間高低（壓力/支撐用）
+        let recentHigh20: Double?
+        let recentLow20: Double?
         /// 成交量異動信號
         let volumeSignal: VolumeSignal?
         /// 最新成交量 / MA20 量比
@@ -428,7 +438,11 @@ enum TechnicalIndicators {
                 ma5Position: nil, ma20Position: nil, maCross: nil,
                 rsi: nil, rsiSignal: nil, kdjSignal: nil, kdjK: nil, kdjD: nil,
                 macdSignal: nil, macdDIF: nil, macdDEA: nil,
-                bollingerSignal: nil, volumeSignal: nil, volumeRatio: nil
+                bollingerSignal: nil,
+                bollingerUpper: nil, bollingerMiddle: nil, bollingerLower: nil,
+                ma5Value: nil, ma20Value: nil,
+                recentHigh20: nil, recentLow20: nil,
+                volumeSignal: nil, volumeRatio: nil
             )
         }
 
@@ -570,6 +584,20 @@ enum TechnicalIndicators {
             bbSig = .normal
         }
 
+        // ── 布林通道數值 ──
+        let latestBB = bbValues.last ?? nil
+        let bbUpper = latestBB?.upper
+        let bbMiddle = latestBB?.middle
+        let bbLower = latestBB?.lower
+
+        // ── 均線數值 ──
+        let latestMA5 = maShortValues.last ?? nil
+        let latestMA20 = maLongValues.last ?? nil
+
+        // ── 近 20 日區間高低 ──
+        let recent20High: Double? = highs.count >= 20 ? highs.suffix(20).max() : (highs.isEmpty ? nil : highs.max())
+        let recent20Low: Double? = lows.count >= 20 ? lows.suffix(20).min() : (lows.isEmpty ? nil : lows.min())
+
         // ── 成交量異動 ──
         let volSig: VolumeSignal
         var volRatio: Double?
@@ -609,8 +637,239 @@ enum TechnicalIndicators {
             macdDIF: latestDIF,
             macdDEA: latestDEA,
             bollingerSignal: bbSig == .normal ? nil : bbSig,
+            bollingerUpper: bbUpper,
+            bollingerMiddle: bbMiddle,
+            bollingerLower: bbLower,
+            ma5Value: latestMA5,
+            ma20Value: latestMA20,
+            recentHigh20: recent20High,
+            recentLow20: recent20Low,
             volumeSignal: volSig == .normal ? nil : volSig,
             volumeRatio: volRatio
         )
+    }
+
+    // MARK: - Sell Recommendation
+
+    /// 賣出建議等級
+    enum SellLevel: Sendable {
+        case strongSell     // ≥ 70
+        case considerSell   // 50–69
+        case neutral        // 30–49
+        case holdBullish    // 10–29
+        case strongHold     // < 10
+
+        var label: String {
+            switch self {
+            case .strongSell: return "強烈建議賣出"
+            case .considerSell: return "建議考慮賣出"
+            case .neutral: return "觀望"
+            case .holdBullish: return "持有偏多"
+            case .strongHold: return "強力持有"
+            }
+        }
+
+        var shortLabel: String {
+            switch self {
+            case .strongSell: return "建議賣出"
+            case .considerSell: return "考慮賣出"
+            case .neutral: return "觀望"
+            case .holdBullish: return "偏多持有"
+            case .strongHold: return "強力持有"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .strongSell: return "exclamationmark.triangle.fill"
+            case .considerSell: return "exclamationmark.circle.fill"
+            case .neutral: return "minus.circle"
+            case .holdBullish: return "hand.thumbsup"
+            case .strongHold: return "checkmark.shield.fill"
+            }
+        }
+    }
+
+    /// 影響因子
+    struct SellFactor: Sendable, Identifiable {
+        let id = UUID()
+        let name: String      // e.g. "均線死叉"
+        let points: Int       // e.g. +15 or -10
+        let isBearish: Bool   // true = 偏空（加分）, false = 偏多（扣分）
+    }
+
+    /// 賣出建議結果
+    struct SellRecommendation: Sendable {
+        let score: Int              // 0–100
+        let level: SellLevel
+        let factors: [SellFactor]
+    }
+
+    /// 計算綜合賣出建議
+    static func computeSellRecommendation(
+        signal: SignalSummary,
+        trailingStopTriggered: Bool,
+        nearTrailingStop: Bool,
+        foreignStreak: Int?,
+        trustStreak: Int?
+    ) -> SellRecommendation {
+        var score = 50
+        var factors: [SellFactor] = []
+
+        // ── 均線交叉 ──
+        if let maCross = signal.maCross {
+            switch maCross {
+            case .deathCross:
+                score += 15
+                factors.append(SellFactor(name: "均線死叉", points: 15, isBearish: true))
+            case .goldenCross:
+                score -= 10
+                factors.append(SellFactor(name: "均線金叉", points: -10, isBearish: false))
+            }
+        }
+
+        // ── MACD 交叉 ──
+        if let macdSig = signal.macdSignal {
+            switch macdSig {
+            case .deathCross:
+                score += 12
+                factors.append(SellFactor(name: "MACD死叉", points: 12, isBearish: true))
+            case .goldenCross:
+                score -= 8
+                factors.append(SellFactor(name: "MACD金叉", points: -8, isBearish: false))
+            case .none:
+                break
+            }
+        }
+
+        // ── KDJ 交叉 ──
+        if let kdjSig = signal.kdjSignal {
+            switch kdjSig {
+            case .deathCross:
+                score += 10
+                factors.append(SellFactor(name: "KD死叉", points: 10, isBearish: true))
+            case .goldenCross:
+                score -= 6
+                factors.append(SellFactor(name: "KD金叉", points: -6, isBearish: false))
+            case .none:
+                break
+            }
+        }
+
+        // ── RSI ──
+        if let rsiSig = signal.rsiSignal {
+            switch rsiSig {
+            case .overbought:
+                score += 12
+                factors.append(SellFactor(name: "RSI超買", points: 12, isBearish: true))
+            case .oversold:
+                score -= 8
+                factors.append(SellFactor(name: "RSI超賣", points: -8, isBearish: false))
+            case .neutral:
+                break
+            }
+        }
+
+        // ── 布林通道 ──
+        if let bbSig = signal.bollingerSignal {
+            switch bbSig {
+            case .nearUpper:
+                score += 8
+                factors.append(SellFactor(name: "觸布林上軌", points: 8, isBearish: true))
+            case .nearLower:
+                score -= 6
+                factors.append(SellFactor(name: "觸布林下軌", points: -6, isBearish: false))
+            case .squeeze, .normal:
+                break
+            }
+        }
+
+        // ── 成交量 ──
+        if let volSig = signal.volumeSignal {
+            switch volSig {
+            case .surge:
+                // 爆量配合均線空頭 → 偏空
+                score += 8
+                factors.append(SellFactor(name: "爆量", points: 8, isBearish: true))
+            case .shrink:
+                score += 3
+                factors.append(SellFactor(name: "量縮", points: 3, isBearish: true))
+            case .high, .normal:
+                break
+            }
+        }
+
+        // ── 移動停利 ──
+        if trailingStopTriggered {
+            score += 20
+            factors.append(SellFactor(name: "跌破停利線", points: 20, isBearish: true))
+        } else if nearTrailingStop {
+            score += 10
+            factors.append(SellFactor(name: "接近停利線", points: 10, isBearish: true))
+        } else {
+            score -= 5
+            factors.append(SellFactor(name: "安全持有中", points: -5, isBearish: false))
+        }
+
+        // ── MA 位置 ──
+        if let ma5 = signal.ma5Position {
+            if ma5 == .below {
+                score += 5
+                factors.append(SellFactor(name: "價格在MA5下方", points: 5, isBearish: true))
+            } else {
+                score -= 3
+                factors.append(SellFactor(name: "價格在MA5上方", points: -3, isBearish: false))
+            }
+        }
+        if let ma20 = signal.ma20Position {
+            if ma20 == .below {
+                score += 5
+                factors.append(SellFactor(name: "價格在MA20下方", points: 5, isBearish: true))
+            } else {
+                score -= 3
+                factors.append(SellFactor(name: "價格在MA20上方", points: -3, isBearish: false))
+            }
+        }
+
+        // ── 法人動態 ──
+        if let fs = foreignStreak, abs(fs) >= 3 {
+            if fs < 0 {
+                score += 5
+                factors.append(SellFactor(name: "外資連賣\(abs(fs))日", points: 5, isBearish: true))
+            } else {
+                score -= 3
+                factors.append(SellFactor(name: "外資連買\(fs)日", points: -3, isBearish: false))
+            }
+        }
+        if let ts = trustStreak, abs(ts) >= 3 {
+            if ts < 0 {
+                score += 5
+                factors.append(SellFactor(name: "投信連賣\(abs(ts))日", points: 5, isBearish: true))
+            } else {
+                score -= 3
+                factors.append(SellFactor(name: "投信連買\(ts)日", points: -3, isBearish: false))
+            }
+        }
+
+        // Clamp
+        let finalScore = min(100, max(0, score))
+
+        // 決定等級
+        let level: SellLevel
+        switch finalScore {
+        case 70...100: level = .strongSell
+        case 50..<70:  level = .considerSell
+        case 30..<50:  level = .neutral
+        case 10..<30:  level = .holdBullish
+        default:       level = .strongHold
+        }
+
+        // 排序：偏空在前，分數高在前
+        let sorted = factors.sorted { a, b in
+            if a.isBearish != b.isBearish { return a.isBearish }
+            return abs(a.points) > abs(b.points)
+        }
+
+        return SellRecommendation(score: finalScore, level: level, factors: sorted)
     }
 }

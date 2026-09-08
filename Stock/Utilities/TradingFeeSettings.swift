@@ -12,6 +12,12 @@ struct TradingFeeSettings: Codable, Equatable, Sendable {
     /// 移動停利 — 從最高價回撤百分比 (%)，預設 10%
     var trailingStopPct: Double = 10
 
+    /// 是否顯示賣出建議（預設關閉）
+    var sellRecommendationEnabled: Bool = false
+
+    /// 是否顯示壓力/支撐價位（預設關閉）
+    var supportResistanceEnabled: Bool = false
+
     // MARK: - Defaults
 
     static let defaults = TradingFeeSettings()

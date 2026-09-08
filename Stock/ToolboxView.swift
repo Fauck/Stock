@@ -26,7 +26,7 @@ struct ToolboxView: View {
 
                         toolCard(
                             title: "損益走勢圖",
-                            subtitle: "累計實現損益曲線與月度績效走勢",
+                            subtitle: "已實現與未實現損益曲線、月度績效走勢",
                             icon: "chart.line.uptrend.xyaxis",
                             iconColor: AppColor.secondary,
                             destination: PnLChartView()

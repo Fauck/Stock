@@ -9,30 +9,54 @@ import SwiftUI
 import SwiftData
 import Charts
 
-/// 損益走勢圖：累計已實現損益曲線 + 月度/季度柱狀圖
+/// 損益走勢圖：已實現損益 / 未實現損益 切換
 struct PnLChartView: View {
     @Query(filter: #Predicate<Investment> { $0.isClosed },
            sort: \Investment.buyDate, order: .reverse)
     private var soldInvestments: [Investment]
 
+    @Query(filter: #Predicate<Investment> { !$0.isClosed })
+    private var openInvestments: [Investment]
+
     @State private var vm = PnLChartViewModel()
+    @State private var unrealizedVM = UnrealizedPnLChartViewModel()
+    @State private var selectedSegment: PnLSegment = .realized
+
+    // 自訂區間暫存（選完按確認才套用）
+    @State private var realizedCustomStart: Date = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
+    @State private var realizedCustomEnd: Date = Date()
+    @State private var unrealizedCustomStart: Date = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
+    @State private var unrealizedCustomEnd: Date = Date()
 
     var body: some View {
         ZStack {
             AppColor.background.ignoresSafeArea()
 
-            if vm.allSoldInvestments.isEmpty {
-                emptyState
-            } else {
-                ScrollView {
-                    VStack(spacing: 16) {
-                        filterBar
-                        summaryCard
-                        cumulativeChart
-                        periodChart
+            ScrollView {
+                VStack(spacing: 16) {
+                    segmentPicker
+
+                    switch selectedSegment {
+                    case .realized:
+                        if vm.allSoldInvestments.isEmpty {
+                            emptyState
+                        } else {
+                            filterBar
+                            summaryCard
+                            cumulativeChart
+                            periodChart
+                        }
+                    case .unrealized:
+                        if unrealizedVM.openInvestments.isEmpty {
+                            unrealizedEmptyState
+                        } else {
+                            unrealizedFilterBar
+                            unrealizedSummaryCard
+                            unrealizedChart
+                        }
                     }
-                    .padding(16)
                 }
+                .padding(16)
             }
         }
         .navigationTitle("損益走勢圖")
@@ -40,8 +64,17 @@ struct PnLChartView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbarBackground(AppColor.primary, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .onAppear { vm.allSoldInvestments = soldInvestments }
+        .onAppear {
+            vm.allSoldInvestments = soldInvestments
+            unrealizedVM.openInvestments = openInvestments
+        }
         .onChange(of: soldInvestments) { vm.allSoldInvestments = soldInvestments }
+        .onChange(of: openInvestments) { unrealizedVM.openInvestments = openInvestments }
+        .onChange(of: selectedSegment) { _, newValue in
+            if newValue == .unrealized && unrealizedVM.chartData.isEmpty && !unrealizedVM.openInvestments.isEmpty {
+                Task { await unrealizedVM.loadCandleData() }
+            }
+        }
     }
 
     // MARK: - 空狀態
@@ -57,7 +90,271 @@ struct PnLChartView: View {
         }
     }
 
-    // MARK: - 日期篩選列
+    // MARK: - 分頁切換
+
+    private var segmentPicker: some View {
+        HStack(spacing: 0) {
+            ForEach(PnLSegment.allCases) { segment in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        selectedSegment = segment
+                    }
+                } label: {
+                    Text(segment.rawValue)
+                        .font(.warmSubheadline())
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            selectedSegment == segment
+                                ? AppColor.primary
+                                : AppColor.cardBackground
+                        )
+                        .foregroundStyle(
+                            selectedSegment == segment
+                                ? .white
+                                : AppColor.textMain
+                        )
+                }
+            }
+        }
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+    }
+
+    // MARK: - 未實現空狀態
+
+    private var unrealizedEmptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "chart.line.flattrend.xyaxis")
+                .font(.system(size: 48))
+                .foregroundStyle(AppColor.textSecondary.opacity(0.4))
+            Text("尚無持有中部位")
+                .font(.warmSubheadline())
+                .foregroundStyle(AppColor.textSecondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 300)
+    }
+
+    // MARK: - 未實現日期篩選
+
+    private var unrealizedFilterBar: some View {
+        VStack(spacing: 10) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(DateFilterOption.allCases) { option in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                unrealizedVM.selectedFilter = option
+                            }
+                        } label: {
+                            Text(option.rawValue)
+                                .font(.warmCaption())
+                                .fontWeight(.medium)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(
+                                    unrealizedVM.selectedFilter == option
+                                        ? AppColor.primary
+                                        : AppColor.cardBackground
+                                )
+                                .foregroundStyle(
+                                    unrealizedVM.selectedFilter == option
+                                        ? .white
+                                        : AppColor.textMain
+                                )
+                                .clipShape(Capsule())
+                                .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+                        }
+                    }
+                }
+            }
+
+            if unrealizedVM.selectedFilter == .custom {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("起始日期")
+                            .font(.warmCaption2())
+                            .foregroundStyle(AppColor.textSecondary)
+                        DatePicker("", selection: $unrealizedCustomStart, displayedComponents: .date)
+                            .labelsHidden()
+                            .tint(AppColor.primary)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("結束日期")
+                            .font(.warmCaption2())
+                            .foregroundStyle(AppColor.textSecondary)
+                        DatePicker("", selection: $unrealizedCustomEnd, displayedComponents: .date)
+                            .labelsHidden()
+                            .tint(AppColor.primary)
+                    }
+                    Button {
+                        unrealizedVM.customStartDate = unrealizedCustomStart
+                        unrealizedVM.customEndDate = unrealizedCustomEnd
+                    } label: {
+                        Text("確認")
+                            .font(.warmCaption())
+                            .fontWeight(.semibold)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(AppColor.primary)
+                            .foregroundStyle(.white)
+                            .clipShape(Capsule())
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    // MARK: - 未實現摘要卡片
+
+    private var unrealizedSummaryCard: some View {
+        let s = unrealizedVM.summary
+        return VStack(spacing: 12) {
+            HStack {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .foregroundStyle(AppColor.primary)
+                Text("持倉摘要")
+                    .font(.warmHeadline())
+                    .foregroundStyle(AppColor.textMain)
+                Spacer()
+                Text("\(s.positionCount) 檔持有")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            AppColor.divider.frame(height: 1)
+
+            HStack {
+                Text("未實現損益")
+                    .font(.warmSubheadline())
+                    .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+                Text("\(s.currentPnL >= 0 ? "+" : "")$\(s.currentPnL, specifier: "%.0f")")
+                    .font(.warmLargeNumber())
+                    .foregroundStyle(Color.profitLossColor(s.currentPnL))
+            }
+
+            HStack(spacing: 0) {
+                statBadge(title: "報酬率",
+                          value: String(format: "%.1f%%", s.returnPct),
+                          color: Color.profitLossColor(s.returnPct))
+                Spacer()
+                statBadge(title: "區間高點",
+                          value: formatAmount(s.peakPnL),
+                          color: AppColor.softUp)
+                Spacer()
+                statBadge(title: "區間低點",
+                          value: formatAmount(s.troughPnL),
+                          color: AppColor.softDown)
+                Spacer()
+                statBadge(title: "投入成本",
+                          value: formatAmount(s.totalCost),
+                          color: AppColor.textMain)
+            }
+        }
+        .cardStyle()
+    }
+
+    // MARK: - 未實現損益走勢圖
+
+    private var unrealizedChart: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "waveform.path.ecg")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.primary)
+                Text("未實現損益走勢")
+                    .font(.warmHeadline())
+                    .foregroundStyle(AppColor.textMain)
+                Spacer()
+                if unrealizedVM.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                }
+            }
+
+            if unrealizedVM.isLoading && unrealizedVM.chartData.isEmpty {
+                ProgressView("載入歷史資料中...")
+                    .font(.warmCaption())
+                    .frame(maxWidth: .infinity, minHeight: 220)
+            } else {
+                let data = unrealizedVM.chartData
+
+                if data.isEmpty {
+                    Text("無歷史資料")
+                        .font(.warmCaption())
+                        .foregroundStyle(AppColor.textSecondary)
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                } else {
+                    Chart {
+                        ForEach(data) { point in
+                            LineMark(
+                                x: .value("日期", point.date),
+                                y: .value("未實現損益", point.totalUnrealizedPnL)
+                            )
+                            .foregroundStyle(AppColor.primary)
+                            .interpolationMethod(.catmullRom)
+
+                            AreaMark(
+                                x: .value("日期", point.date),
+                                yStart: .value("零線", 0),
+                                yEnd: .value("未實現損益", point.totalUnrealizedPnL)
+                            )
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [
+                                        (point.totalUnrealizedPnL >= 0
+                                            ? AppColor.softUp : AppColor.softDown).opacity(0.3),
+                                        (point.totalUnrealizedPnL >= 0
+                                            ? AppColor.softUp : AppColor.softDown).opacity(0.05)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .interpolationMethod(.catmullRom)
+                        }
+
+                        RuleMark(y: .value("零線", 0))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .foregroundStyle(AppColor.textSecondary.opacity(0.5))
+                    }
+                    .chartYAxis {
+                        AxisMarks(position: .leading) { value in
+                            AxisValueLabel {
+                                if let v = value.as(Double.self) {
+                                    Text(formatAmount(v))
+                                        .font(.warmCaption2())
+                                        .foregroundStyle(AppColor.textSecondary)
+                                }
+                            }
+                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                                .foregroundStyle(AppColor.divider)
+                        }
+                    }
+                    .chartXAxis {
+                        AxisMarks(values: .automatic(desiredCount: 5)) { value in
+                            AxisValueLabel {
+                                if let date = value.as(Date.self) {
+                                    Text(formatChartDate(date))
+                                        .font(.warmCaption2())
+                                        .foregroundStyle(AppColor.textSecondary)
+                                }
+                            }
+                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                                .foregroundStyle(AppColor.divider)
+                        }
+                    }
+                    .frame(height: 220)
+                }
+            }
+        }
+        .cardStyle()
+    }
+
+    // MARK: - 日期篩選列（已實現）
 
     private var filterBar: some View {
         VStack(spacing: 10) {
@@ -92,12 +389,12 @@ struct PnLChartView: View {
             }
 
             if vm.selectedFilter == .custom {
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("起始日期")
                             .font(.warmCaption2())
                             .foregroundStyle(AppColor.textSecondary)
-                        DatePicker("", selection: $vm.customStartDate, displayedComponents: .date)
+                        DatePicker("", selection: $realizedCustomStart, displayedComponents: .date)
                             .labelsHidden()
                             .tint(AppColor.primary)
                     }
@@ -105,9 +402,22 @@ struct PnLChartView: View {
                         Text("結束日期")
                             .font(.warmCaption2())
                             .foregroundStyle(AppColor.textSecondary)
-                        DatePicker("", selection: $vm.customEndDate, displayedComponents: .date)
+                        DatePicker("", selection: $realizedCustomEnd, displayedComponents: .date)
                             .labelsHidden()
                             .tint(AppColor.primary)
+                    }
+                    Button {
+                        vm.customStartDate = realizedCustomStart
+                        vm.customEndDate = realizedCustomEnd
+                    } label: {
+                        Text("確認")
+                            .font(.warmCaption())
+                            .fontWeight(.semibold)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(AppColor.primary)
+                            .foregroundStyle(.white)
+                            .clipShape(Capsule())
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))

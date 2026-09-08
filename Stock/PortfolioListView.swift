@@ -53,7 +53,8 @@ struct PortfolioListView: View {
                         currentPrice: vm.currentPrice(for: group.ticker),
                         displayName: vm.displayName(for: group.ticker),
                         highSinceBuy: vm.highSinceBuy[group.ticker],
-                        institutionalData: vm.institutionalData[group.ticker]
+                        institutionalData: vm.institutionalData[group.ticker],
+                        sellRecommendation: vm.sellRecommendation(for: group.ticker, avgCost: group.weightedAverageCost)
                     )
                 }
             }
@@ -318,7 +319,7 @@ struct PortfolioListView: View {
                         // 技術信號標籤列
                         if let signal = vm.technicalSignals[group.ticker] {
                             FlowLayout(spacing: 4) {
-                                compactSignalBadges(signal, ticker: group.ticker)
+                                compactSignalBadges(signal, ticker: group.ticker, avgCost: group.weightedAverageCost)
                             }
                         }
                     }
@@ -560,14 +561,14 @@ struct PortfolioListView: View {
 
     /// 摺疊狀態下的精簡信號徽章（僅顯示重要觸發信號）
     @ViewBuilder
-    private func compactSignalBadges(_ signal: TechnicalIndicators.SignalSummary, ticker: String) -> some View {
+    private func compactSignalBadges(_ signal: TechnicalIndicators.SignalSummary, ticker: String, avgCost: Double) -> some View {
         // 均線交叉
         if let maCross = signal.maCross {
-            signalPill(maCross.label, color: maCross == .goldenCross ? AppColor.secondary : AppColor.softDown)
+            signalPill(maCross.label, color: maCross == .goldenCross ? AppColor.softUp : AppColor.softDown)
         }
         // MACD 交叉
         if let macdSig = signal.macdSignal, let label = macdSig.label {
-            signalPill(label, color: macdSig == .goldenCross ? AppColor.secondary : AppColor.softDown)
+            signalPill(label, color: macdSig == .goldenCross ? AppColor.softUp : AppColor.softDown)
         }
         // 超買超賣
         if let rsiSig = signal.rsiSignal, let label = rsiSig.label {
@@ -575,7 +576,7 @@ struct PortfolioListView: View {
         }
         // KD 交叉
         if let kdjSig = signal.kdjSignal, let label = kdjSig.label {
-            signalPill(label, color: kdjSig == .goldenCross ? AppColor.secondary : AppColor.softDown)
+            signalPill(label, color: kdjSig == .goldenCross ? AppColor.softUp : AppColor.softDown)
         }
         // 布林通道
         if let bbSig = signal.bollingerSignal, let label = bbSig.label {
@@ -601,12 +602,23 @@ struct PortfolioListView: View {
             let fs = inst.foreignStreak
             if abs(fs) >= 2 {
                 signalPill("外資連\(fs > 0 ? "買" : "賣")\(abs(fs))日",
-                           color: fs > 0 ? AppColor.secondary : AppColor.softDown)
+                           color: fs > 0 ? AppColor.softUp : AppColor.softDown)
             }
             let ts = inst.trustStreak
             if abs(ts) >= 2 {
                 signalPill("投信連\(ts > 0 ? "買" : "賣")\(abs(ts))日",
-                           color: ts > 0 ? AppColor.secondary : AppColor.softDown)
+                           color: ts > 0 ? AppColor.softUp : AppColor.softDown)
+            }
+        }
+        // 賣出建議（僅顯示偏空等級）
+        if let rec = vm.sellRecommendation(for: ticker, avgCost: avgCost) {
+            switch rec.level {
+            case .strongSell:
+                signalPill(rec.level.shortLabel, color: AppColor.softDown, filled: true)
+            case .considerSell:
+                signalPill(rec.level.shortLabel, color: .orange, filled: true)
+            default:
+                EmptyView()
             }
         }
     }
@@ -634,7 +646,7 @@ struct PortfolioListView: View {
                 if let ma5 = signal.ma5Position {
                     signalPill(
                         ma5 == .above ? "MA5↑" : "MA5↓",
-                        color: ma5 == .above ? AppColor.secondary : AppColor.softDown
+                        color: ma5 == .above ? AppColor.softUp : AppColor.softDown
                     )
                 }
 
@@ -642,7 +654,7 @@ struct PortfolioListView: View {
                 if let ma20 = signal.ma20Position {
                     signalPill(
                         ma20 == .above ? "MA20↑" : "MA20↓",
-                        color: ma20 == .above ? AppColor.secondary : AppColor.softDown
+                        color: ma20 == .above ? AppColor.softUp : AppColor.softDown
                     )
                 }
 
@@ -670,7 +682,7 @@ struct PortfolioListView: View {
                     )
                 }
                 if let kdjSig = signal.kdjSignal, let label = kdjSig.label {
-                    signalPill(label, color: kdjSig == .goldenCross ? AppColor.secondary : AppColor.softDown, filled: true)
+                    signalPill(label, color: kdjSig == .goldenCross ? AppColor.softUp : AppColor.softDown, filled: true)
                 }
             }
         }

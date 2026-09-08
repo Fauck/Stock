@@ -441,6 +441,83 @@ actor StockService {
         let shares = Int(cleaned) ?? 0
         return shares / 1000
     }
+
+    // MARK: - TPEx (櫃買) 三大法人買賣超
+
+    /// TPEx 三大法人買賣超 API 回應
+    /// 結構：{ "tables": [ { "data": [[String]], ... } ], "stat": "ok" }
+    private struct TPExInstitutionalResponse: Decodable {
+        let tables: [TPExTable]?
+        let stat: String?
+
+        struct TPExTable: Decodable {
+            let data: [[String]]?
+            let totalCount: Int?
+        }
+    }
+
+    /// 取得單日櫃買市場（上櫃）個股的三大法人買賣超
+    /// - Parameter date: 日期格式 "yyyyMMdd"（會轉換為民國日期格式）
+    /// - Returns: [證券代號: InstitutionalDayData]
+    func fetchTPExInstitutionalData(date: String) async throws -> [String: InstitutionalDayData] {
+        // 將西元 yyyyMMdd 轉為民國 yyy/MM/dd
+        guard date.count == 8,
+              let year = Int(date.prefix(4)) else {
+            throw StockServiceError.invalidURL
+        }
+        let rocYear = year - 1911
+        let rocDate = "\(rocYear)/\(date.dropFirst(4).prefix(2))/\(date.dropFirst(6))"
+
+        let urlString = "https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&o=json&se=EW&t=D&d=\(rocDate)"
+        guard let url = URL(string: urlString) else {
+            throw StockServiceError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw StockServiceError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw StockServiceError.httpError(http.statusCode)
+        }
+
+        let decoded = try JSONDecoder().decode(TPExInstitutionalResponse.self, from: data)
+        guard let rows = decoded.tables?.first?.data, !rows.isEmpty else {
+            throw StockServiceError.noData
+        }
+
+        // TPEx 24 欄位格式：
+        // [0] 代號, [1] 名稱
+        // [2-4] 外資及陸資(不含自營商) buy/sell/net
+        // [5-7] 外資自營商 buy/sell/net
+        // [8-10] 外資及陸資合計 buy/sell/net → net = [10]
+        // [11-13] 投信 buy/sell/net → net = [13]
+        // [14-16] 自營商(自行買賣) buy/sell/net
+        // [17-19] 自營商(避險) buy/sell/net
+        // [20-22] 自營商合計 buy/sell/net → net = [22]
+        // [23] 三大法人合計
+        var result: [String: InstitutionalDayData] = [:]
+        for row in rows where row.count >= 24 {
+            let code = row[0].trimmingCharacters(in: .whitespaces)
+            guard !code.isEmpty else { continue }
+            let foreignNet = Self.parseShares(row[10])
+            let trustNet = Self.parseShares(row[13])
+            let dealerNet = Self.parseShares(row[22])
+            let totalNet = Self.parseShares(row[23])
+
+            result[code] = InstitutionalDayData(
+                date: date,
+                foreignNet: foreignNet,
+                trustNet: trustNet,
+                dealerNet: dealerNet,
+                totalNet: totalNet
+            )
+        }
+        return result
+    }
 }
 
 // MARK: - Errors
