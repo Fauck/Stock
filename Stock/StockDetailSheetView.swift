@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct StockDetailSheetView: View {
     let group: PortfolioGroup
@@ -16,9 +17,31 @@ struct StockDetailSheetView: View {
     let highSinceBuy: Double?
     let institutionalData: StockService.InstitutionalSummary?
     let sellRecommendation: TechnicalIndicators.SellRecommendation?
+    let journalTarget: PortfolioListViewModel.JournalTarget?
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query private var allJournals: [TradeJournal]
+    @Query(filter: #Predicate<Investment> { !$0.isClosed },
+           sort: \Investment.buyDate, order: .reverse)
+    private var allInvestments: [Investment]
     @State private var chartVM: KLineChartViewModel
+    @State private var showingTargetStopEdit = false
+
+    /// 動態計算目標/停損（從 @Query 即時讀取，編輯後自動更新）
+    private var liveJournalTarget: PortfolioListViewModel.JournalTarget? {
+        let investmentIDs = Set(allInvestments.filter { $0.ticker == group.ticker }.map(\.id))
+        let matchingJournals = allJournals.filter { investmentIDs.contains($0.investmentID) }
+        var targetPrice: Double? = nil
+        var stopLoss: Double? = nil
+        for j in matchingJournals {
+            if targetPrice == nil, let t = j.targetPrice { targetPrice = t }
+            if stopLoss == nil, let s = j.initialStopLoss { stopLoss = s }
+            if targetPrice != nil && stopLoss != nil { break }
+        }
+        if targetPrice == nil && stopLoss == nil { return nil }
+        return PortfolioListViewModel.JournalTarget(targetPrice: targetPrice, stopLoss: stopLoss)
+    }
 
     init(
         group: PortfolioGroup,
@@ -28,7 +51,8 @@ struct StockDetailSheetView: View {
         displayName: String,
         highSinceBuy: Double? = nil,
         institutionalData: StockService.InstitutionalSummary? = nil,
-        sellRecommendation: TechnicalIndicators.SellRecommendation? = nil
+        sellRecommendation: TechnicalIndicators.SellRecommendation? = nil,
+        journalTarget: PortfolioListViewModel.JournalTarget? = nil
     ) {
         self.group = group
         self.signal = signal
@@ -38,6 +62,7 @@ struct StockDetailSheetView: View {
         self.highSinceBuy = highSinceBuy
         self.institutionalData = institutionalData
         self.sellRecommendation = sellRecommendation
+        self.journalTarget = journalTarget
         self._chartVM = State(initialValue: KLineChartViewModel(group: group))
     }
 
@@ -56,12 +81,45 @@ struct StockDetailSheetView: View {
                             technicalSignalSection(signal)
                         }
 
+                        // 背離信號
+                        if let signal, !signal.divergences.isEmpty {
+                            divergenceSection(signal.divergences)
+                        }
+
+                        // K 線型態
+                        if let signal, !signal.candlestickPatterns.isEmpty {
+                            candlestickPatternSection(signal.candlestickPatterns)
+                        }
+
                         // 賣出建議
                         if let rec = sellRecommendation {
                             sellRecommendationSection(rec)
                         }
 
-                       
+                        // 目標 / 停損
+                        if let price = currentPrice,
+                           let jt = liveJournalTarget,
+                           (jt.targetPrice != nil || jt.stopLoss != nil) {
+                            targetStopSection(currentPrice: price, target: jt, avgCost: group.weightedAverageCost)
+                        } else {
+                            // 尚未設定，提供設定按鈕
+                            Button { showingTargetStopEdit = true } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "target")
+                                        .font(.system(size: 12))
+                                    Text("設定目標 / 停損")
+                                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                                }
+                                .foregroundStyle(AppColor.primary)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .frame(maxWidth: .infinity)
+                                .background(AppColor.primary.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
                         // 移動停利建議
                         if let price = currentPrice, let high = highSinceBuy, high > 0 {
                             trailingStopSection(currentPrice: price, highSinceBuy: high, avgCost: group.weightedAverageCost)
@@ -107,7 +165,30 @@ struct StockDetailSheetView: View {
             .task {
                 await chartVM.loadCandles()
             }
+            .sheet(isPresented: $showingTargetStopEdit) {
+                TargetStopEditSheetInDetail(
+                    ticker: group.ticker,
+                    journal: latestJournalForTicker(),
+                    investment: latestInvestmentForTicker()
+                )
+            }
         }
+    }
+
+    /// 找到此 ticker 最近的 journal（依 investment buyDate 排序取最新）
+    private func latestJournalForTicker() -> TradeJournal? {
+        let tickerInvestments = allInvestments.filter { $0.ticker == group.ticker }
+        for inv in tickerInvestments {
+            if let j = allJournals.first(where: { $0.investmentID == inv.id }) {
+                return j
+            }
+        }
+        return nil
+    }
+
+    /// 找到此 ticker 最近的 investment
+    private func latestInvestmentForTicker() -> Investment? {
+        allInvestments.first { $0.ticker == group.ticker }
     }
 
     // MARK: - K 線走勢圖
@@ -278,6 +359,184 @@ struct StockDetailSheetView: View {
                 .frame(width: 32, alignment: .leading)
             content()
         }
+    }
+
+    // MARK: - 背離信號卡片
+
+    private func divergenceSection(_ divergences: [TechnicalIndicators.DivergenceSignal]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.triangle.swap")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("背離信號")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            ForEach(divergences) { div in
+                let isBearish = div.type == .bearish
+                let typeLabel = isBearish ? "頂背離" : "底背離"
+                let color: Color = isBearish ? AppColor.softDown : AppColor.softUp
+                let icon = isBearish ? "arrow.down.circle.fill" : "arrow.up.circle.fill"
+                let description = isBearish
+                    ? "價格創新高但\(div.indicator)未跟上，動能衰減"
+                    : "價格創新低但\(div.indicator)未跟下，動能回升"
+
+                VStack(alignment: .leading, spacing: 6) {
+                    // 標題行
+                    HStack(spacing: 6) {
+                        Image(systemName: icon)
+                            .font(.system(size: 12))
+                            .foregroundStyle(color)
+                        Text("\(div.indicator) \(typeLabel)")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(color)
+                        Spacer()
+                        Text("\(div.barsAgo) 日前起")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppColor.textSecondary)
+                    }
+
+                    // 數據對比
+                    HStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("股價")
+                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                                .foregroundStyle(AppColor.textSecondary)
+                            HStack(spacing: 4) {
+                                Text(String(format: "%.1f", div.pricePoint1))
+                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .foregroundStyle(AppColor.textMain)
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(AppColor.textSecondary)
+                                Text(String(format: "%.1f", div.pricePoint2))
+                                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(AppColor.textMain)
+                                let priceDir = div.pricePoint2 >= div.pricePoint1
+                                Image(systemName: priceDir ? "arrow.up" : "arrow.down")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(priceDir ? AppColor.softUp : AppColor.softDown)
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(div.indicator)
+                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                                .foregroundStyle(AppColor.textSecondary)
+                            HStack(spacing: 4) {
+                                Text(div.indicator == "RSI"
+                                     ? String(format: "%.1f", div.indicatorPoint1)
+                                     : String(format: "%.2f", div.indicatorPoint1))
+                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .foregroundStyle(AppColor.textMain)
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(AppColor.textSecondary)
+                                Text(div.indicator == "RSI"
+                                     ? String(format: "%.1f", div.indicatorPoint2)
+                                     : String(format: "%.2f", div.indicatorPoint2))
+                                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(AppColor.textMain)
+                                let indDir = div.indicatorPoint2 >= div.indicatorPoint1
+                                Image(systemName: indDir ? "arrow.up" : "arrow.down")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(indDir ? AppColor.softUp : AppColor.softDown)
+                            }
+                        }
+                    }
+
+                    // 說明
+                    Text(description)
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(color.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+        .padding(12)
+        .background(AppColor.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
+
+    // MARK: - K 線型態卡片
+
+    private func candlestickPatternSection(
+        _ patterns: [TechnicalIndicators.CandlestickSignal]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 4) {
+                Image(systemName: "chart.bar.doc.horizontal")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("K 線型態")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            ForEach(patterns) { pattern in
+                let isBearish = pattern.direction == .bearish
+                let isNeutral = pattern.direction == .neutral
+                let color: Color = isNeutral
+                    ? AppColor.primary
+                    : (isBearish ? AppColor.softDown : AppColor.softUp)
+                let icon = isNeutral
+                    ? "minus.circle.fill"
+                    : (isBearish ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
+                let dirLabel = isNeutral ? "中性" : (isBearish ? "偏空" : "偏多")
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: icon)
+                            .font(.system(size: 12))
+                            .foregroundStyle(color)
+                        Text(pattern.pattern.rawValue)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(color)
+                        Spacer()
+                        Text("可靠度: \(pattern.reliability.rawValue)")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppColor.textSecondary)
+                    }
+
+                    HStack(spacing: 12) {
+                        HStack(spacing: 4) {
+                            Text("方向")
+                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                                .foregroundStyle(AppColor.textSecondary)
+                            Text(dirLabel)
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundStyle(color)
+                        }
+                        HStack(spacing: 4) {
+                            Text("位置")
+                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                                .foregroundStyle(AppColor.textSecondary)
+                            Text(pattern.barsAgo == 0 ? "最新" : "\(pattern.barsAgo) 日前")
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(AppColor.textMain)
+                        }
+                    }
+
+                    Text(pattern.description)
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(color.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+        .padding(12)
+        .background(AppColor.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 
     // MARK: - 賣出建議卡片
@@ -451,6 +710,46 @@ struct StockDetailSheetView: View {
             }
         }
 
+        // 背離信號
+        for div in signal.divergences {
+            switch div.type {
+            case .bearish:
+                items.append(ActionSignalItem(
+                    text: "\(div.indicator) 頂背離：價格創新高但\(div.indicator)未跟上，注意反轉風險",
+                    icon: "arrow.down.circle.fill",
+                    color: AppColor.softDown
+                ))
+            case .bullish:
+                items.append(ActionSignalItem(
+                    text: "\(div.indicator) 底背離：價格創新低但\(div.indicator)未跟下，留意反彈",
+                    icon: "arrow.up.circle.fill",
+                    color: AppColor.softUp
+                ))
+            }
+        }
+
+        // K 線型態
+        for pattern in signal.candlestickPatterns {
+            let icon: String
+            let color: Color
+            switch pattern.direction {
+            case .bullish:
+                icon = "arrow.up.circle.fill"
+                color = AppColor.softUp
+            case .bearish:
+                icon = "arrow.down.circle.fill"
+                color = AppColor.softDown
+            case .neutral:
+                icon = "exclamationmark.triangle.fill"
+                color = AppColor.primary
+            }
+            items.append(ActionSignalItem(
+                text: "\(pattern.pattern.rawValue)：\(pattern.description)",
+                icon: icon,
+                color: color
+            ))
+        }
+
         return items
     }
 
@@ -569,6 +868,192 @@ struct StockDetailSheetView: View {
                 }
             }
         }
+    }
+
+    // MARK: - 目標 / 停損
+
+    private func targetStopSection(currentPrice: Double, target jt: PortfolioListViewModel.JournalTarget, avgCost: Double) -> some View {
+        let tp = jt.targetPrice
+        let sl = jt.stopLoss
+
+        // 距離百分比
+        let distToTarget: Double? = tp.map { ($0 - currentPrice) / currentPrice * 100 }
+        let distToStop: Double? = sl.map { (currentPrice - $0) / currentPrice * 100 }
+
+        // 風險報酬比（R:R）
+        let riskReward: Double? = {
+            guard let t = tp, let s = sl, t > currentPrice, currentPrice > s else { return nil }
+            return (t - currentPrice) / (currentPrice - s)
+        }()
+
+        // 進度條位置（0 = 停損, 1 = 目標）
+        let progressRatio: Double? = {
+            guard let t = tp, let s = sl, t > s else { return nil }
+            return min(max((currentPrice - s) / (t - s), 0), 1)
+        }()
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 4) {
+                Image(systemName: "target")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("目標 / 停損")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+                Button { showingTargetStopEdit = true } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 9))
+                        Text("編輯")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                    }
+                    .foregroundStyle(AppColor.primary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(AppColor.primary.opacity(0.10))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
+            // 價格列
+            HStack(spacing: 0) {
+                if let sl {
+                    VStack(spacing: 2) {
+                        Text("停損價")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppColor.textSecondary)
+                        Text(String(format: "$%.1f", sl))
+                            .font(.warmCaption())
+                            .fontWeight(.semibold)
+                            .foregroundStyle(AppColor.softDown)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+
+                VStack(spacing: 2) {
+                    Text("現價")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary)
+                    Text(String(format: "$%.1f", currentPrice))
+                        .font(.warmCaption())
+                        .fontWeight(.semibold)
+                        .foregroundStyle(AppColor.textMain)
+                }
+                .frame(maxWidth: .infinity)
+
+                if let tp {
+                    VStack(spacing: 2) {
+                        Text("目標價")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppColor.textSecondary)
+                        Text(String(format: "$%.1f", tp))
+                            .font(.warmCaption())
+                            .fontWeight(.semibold)
+                            .foregroundStyle(AppColor.softUp)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+
+                VStack(spacing: 2) {
+                    Text("均價")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary)
+                    Text(String(format: "$%.1f", avgCost))
+                        .font(.warmCaption())
+                        .fontWeight(.semibold)
+                        .foregroundStyle(AppColor.textMain)
+                }
+                .frame(maxWidth: .infinity)
+            }
+
+            // 進度條（只有同時有 target 和 stop 才顯示）
+            if let ratio = progressRatio {
+                VStack(spacing: 4) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            // 背景
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(AppColor.divider)
+                                .frame(height: 8)
+                            // 填充
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [AppColor.softDown, .orange, AppColor.softUp],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: geo.size.width * ratio, height: 8)
+                            // 現價指標
+                            Circle()
+                                .fill(AppColor.textMain)
+                                .frame(width: 12, height: 12)
+                                .offset(x: geo.size.width * ratio - 6)
+                        }
+                    }
+                    .frame(height: 12)
+
+                    HStack {
+                        Text("停損")
+                            .font(.system(size: 8, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppColor.softDown)
+                        Spacer()
+                        Text("目標")
+                            .font(.system(size: 8, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppColor.softUp)
+                    }
+                }
+            }
+
+            // 距離 & R:R
+            HStack(spacing: 0) {
+                if let d = distToTarget {
+                    VStack(spacing: 2) {
+                        Text("距目標")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppColor.textSecondary)
+                        Text(String(format: "%@%.1f%%", d >= 0 ? "+" : "", d))
+                            .font(.warmCaption())
+                            .fontWeight(.semibold)
+                            .foregroundStyle(d > 0 ? AppColor.softUp : AppColor.softDown)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+
+                if let d = distToStop {
+                    VStack(spacing: 2) {
+                        Text("距停損")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppColor.textSecondary)
+                        Text(String(format: "%@%.1f%%", d >= 0 ? "+" : "", d))
+                            .font(.warmCaption())
+                            .fontWeight(.semibold)
+                            .foregroundStyle(d > 0 ? AppColor.textSecondary : AppColor.softDown)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+
+                if let rr = riskReward {
+                    VStack(spacing: 2) {
+                        Text("風險報酬比")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppColor.textSecondary)
+                        Text(String(format: "1:%.1f", rr))
+                            .font(.warmCaption())
+                            .fontWeight(.semibold)
+                            .foregroundStyle(rr >= 2 ? AppColor.softUp : (rr >= 1 ? .orange : AppColor.softDown))
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .padding(12)
+        .background(AppColor.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 
     // MARK: - 移動停利建議
@@ -898,3 +1383,128 @@ struct StockDetailSheetView: View {
             .clipShape(Capsule())
     }
 }
+// MARK: - 目標 / 停損編輯 Sheet（分析頁面用）
+
+private struct TargetStopEditSheetInDetail: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+
+    let ticker: String
+    let journal: TradeJournal?
+    let investment: Investment?
+
+    @State private var targetPriceText: String = ""
+    @State private var stopLossText: String = ""
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppColor.background.ignoresSafeArea()
+
+                VStack(spacing: 16) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(StockMapping.displayName(for: ticker))
+                                .font(.warmTitle())
+                                .foregroundStyle(AppColor.textMain)
+                            Text(ticker)
+                                .font(.warmCaption())
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+                        Spacer()
+                    }
+                    .cardStyle()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "target")
+                                .font(.warmCaption2())
+                                .foregroundStyle(AppColor.softUp)
+                            Text("目標價")
+                                .font(.warmCaption())
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+                        TextField("未設定", text: $targetPriceText)
+                            .keyboardType(.decimalPad)
+                            .font(.warmBody())
+                            .padding(10)
+                            .background(AppColor.background)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .cardStyle()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "shield.slash")
+                                .font(.warmCaption2())
+                                .foregroundStyle(AppColor.softDown)
+                            Text("初始停損價")
+                                .font(.warmCaption())
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+                        TextField("未設定", text: $stopLossText)
+                            .keyboardType(.decimalPad)
+                            .font(.warmBody())
+                            .padding(10)
+                            .background(AppColor.background)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .cardStyle()
+
+                    Spacer()
+
+                    Button { save() } label: {
+                        HStack {
+                            Image(systemName: "checkmark.circle")
+                            Text("儲存")
+                        }
+                        .font(.warmHeadline())
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(AppColor.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                }
+                .padding(16)
+            }
+            .navigationTitle("編輯目標 / 停損")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarBackground(AppColor.primary, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+            }
+            .onAppear { loadExisting() }
+        }
+    }
+
+    private func loadExisting() {
+        if let j = journal {
+            if let t = j.targetPrice { targetPriceText = String(format: "%.2f", t) }
+            if let s = j.initialStopLoss { stopLossText = String(format: "%.2f", s) }
+        }
+    }
+
+    private func save() {
+        let target = Double(targetPriceText)
+        let stopLoss = Double(stopLossText)
+
+        if let journal {
+            journal.targetPrice = target
+            journal.initialStopLoss = stopLoss
+        } else if let investment {
+            let journal = TradeJournal(
+                investmentID: investment.id,
+                initialStopLoss: stopLoss,
+                targetPrice: target
+            )
+            modelContext.insert(journal)
+        }
+        dismiss()
+    }
+}
+

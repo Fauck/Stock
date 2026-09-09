@@ -11,10 +11,7 @@ import SwiftData
 @main
 struct StockApp: App {
     var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Investment.self,
-            TradeJournal.self,
-        ])
+        let schema = Schema(versionedSchema: StockSchemaV1.self)
         let modelConfiguration = ModelConfiguration(
             schema: schema,
             isStoredInMemoryOnly: false
@@ -23,6 +20,7 @@ struct StockApp: App {
         do {
             return try ModelContainer(
                 for: schema,
+                migrationPlan: StockMigrationPlan.self,
                 configurations: [modelConfiguration]
             )
         } catch {

@@ -24,6 +24,7 @@ struct TradeJournalEditView: View {
     @State private var setup: String = ""
     @State private var plannedEntryPriceText: String = ""
     @State private var initialStopLossText: String = ""
+    @State private var targetPriceText: String = ""
 
     // MARK: - 執行中 (Action)
     @State private var emotionScore: Int? = nil
@@ -84,6 +85,7 @@ struct TradeJournalEditView: View {
         setup = j.setup
         if let p = j.plannedEntryPrice { plannedEntryPriceText = String(format: "%.2f", p) }
         if let s = j.initialStopLoss { initialStopLossText = String(format: "%.2f", s) }
+        if let t = j.targetPrice { targetPriceText = String(format: "%.2f", t) }
         emotionScore = j.emotionScore
         // 載入覆盤資料
         if !j.exitReason.isEmpty {
@@ -205,18 +207,36 @@ struct TradeJournalEditView: View {
                 iconColor: AppColor.secondary
             )
 
-            // 預定進場價 & 初始停損價
+            // 預定進場價
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.right.circle")
+                        .font(.warmCaption2())
+                        .foregroundStyle(AppColor.secondary)
+                    Text("預定進場價")
+                        .font(.warmCaption())
+                        .foregroundStyle(AppColor.textSecondary)
+                }
+                TextField("0.00", text: $plannedEntryPriceText)
+                    .keyboardType(.decimalPad)
+                    .font(.warmBody())
+                    .padding(10)
+                    .background(AppColor.background)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
+            // 目標價 & 初始停損價
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 4) {
-                        Image(systemName: "arrow.right.circle")
+                        Image(systemName: "target")
                             .font(.warmCaption2())
-                            .foregroundStyle(AppColor.secondary)
-                        Text("預定進場價")
+                            .foregroundStyle(AppColor.softUp)
+                        Text("目標價")
                             .font(.warmCaption())
                             .foregroundStyle(AppColor.textSecondary)
                     }
-                    TextField("0.00", text: $plannedEntryPriceText)
+                    TextField("0.00", text: $targetPriceText)
                         .keyboardType(.decimalPad)
                         .font(.warmBody())
                         .padding(10)
@@ -376,6 +396,7 @@ struct TradeJournalEditView: View {
     private func save() {
         let plannedEntry = Double(plannedEntryPriceText)
         let stopLoss = Double(initialStopLossText)
+        let target = Double(targetPriceText)
 
         let exitReason: String = {
             if !investment.isClosed { return "" }
@@ -404,6 +425,7 @@ struct TradeJournalEditView: View {
             journal.setup = setup
             journal.plannedEntryPrice = plannedEntry
             journal.initialStopLoss = stopLoss
+            journal.targetPrice = target
             journal.emotionScore = emotionScore
             if investment.isClosed {
                 journal.exitReason = exitReason
@@ -419,6 +441,7 @@ struct TradeJournalEditView: View {
                 setup: setup,
                 plannedEntryPrice: plannedEntry,
                 initialStopLoss: stopLoss,
+                targetPrice: target,
                 emotionScore: emotionScore,
                 exitReason: exitReason,
                 reflection: reflection,

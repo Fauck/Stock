@@ -22,6 +22,7 @@ final class AddInvestmentViewModel {
     var journalSetup: String = ""
     var plannedEntryPriceText: String = ""
     var initialStopLossText: String = ""
+    var targetPriceText: String = ""
     var emotionScore: Int? = nil
 
     // MARK: - 即時股價相關
@@ -155,6 +156,7 @@ final class AddInvestmentViewModel {
         !journalSetup.isEmpty ||
         !plannedEntryPriceText.isEmpty ||
         !initialStopLossText.isEmpty ||
+        !targetPriceText.isEmpty ||
         emotionScore != nil
     }
 
@@ -206,6 +208,7 @@ final class AddInvestmentViewModel {
                 setup: journalSetup.trimmingCharacters(in: .whitespacesAndNewlines),
                 plannedEntryPrice: Double(plannedEntryPriceText),
                 initialStopLoss: Double(initialStopLossText),
+                targetPrice: Double(targetPriceText),
                 emotionScore: emotionScore
             )
             context.insert(journal)

@@ -181,7 +181,17 @@ final class Investment {
     /// 刪除此筆紀錄，並清除相關的部分賣出拆分紀錄
     /// - 若為原始買入紀錄：同時刪除所有由此紀錄拆分出的 partialSellRecord
     /// - 若為部分賣出拆分紀錄：將賣出數量歸還給原始紀錄
-    static func deleteInvestment(_ investment: Investment, context: ModelContext) {
+    static func deleteInvestment(_ investment: Investment, context: ModelContext) throws {
+        // 清除關聯的 TradeJournal（避免孤兒資料）
+        let investmentID = investment.id
+        let journalDescriptor = FetchDescriptor<TradeJournal>(
+            predicate: #Predicate<TradeJournal> { $0.investmentID == investmentID }
+        )
+        let orphanJournals = try context.fetch(journalDescriptor)
+        for j in orphanJournals {
+            context.delete(j)
+        }
+
         if investment.isPartialSellRecord {
             // 這是拆分紀錄，找到同標的、同買入日期、同買入價格的原始紀錄，歸還數量
             let ticker = investment.ticker
@@ -198,10 +208,11 @@ final class Investment {
                     !$0.isClosed
                 }
             )
-            if let originals = try? context.fetch(descriptor),
-               let original = originals.first {
-                original.quantity += soldQty
+            let originals = try context.fetch(descriptor)
+            guard let original = originals.first else {
+                throw InvestmentDeleteError.originalRecordNotFound
             }
+            original.quantity += soldQty
             context.delete(investment)
         } else {
             // 這是原始買入紀錄，同時刪除所有由它拆分出的紀錄
@@ -217,19 +228,39 @@ final class Investment {
                     $0.isPartialSellRecord
                 }
             )
-            if let partials = try? context.fetch(descriptor) {
-                for partial in partials {
-                    context.delete(partial)
+            let partials = try context.fetch(descriptor)
+            for partial in partials {
+                // 清除拆分紀錄的 journals
+                let partialID = partial.id
+                let pjDescriptor = FetchDescriptor<TradeJournal>(
+                    predicate: #Predicate<TradeJournal> { $0.investmentID == partialID }
+                )
+                let pjournals = try context.fetch(pjDescriptor)
+                for pj in pjournals {
+                    context.delete(pj)
                 }
+                context.delete(partial)
             }
             context.delete(investment)
+        }
+    }
+
+    /// 刪除投資紀錄時的錯誤類型
+    enum InvestmentDeleteError: LocalizedError {
+        case originalRecordNotFound
+
+        var errorDescription: String? {
+            switch self {
+            case .originalRecordNotFound:
+                return "找不到原始買入紀錄，無法歸還賣出數量。請嘗試重新啟動 App 後再試。"
+            }
         }
     }
 
     // MARK: - CSV 匯出
 
     /// CSV 表頭
-    static let csvHeader = "標的,買入日期,買入價格,原始數量,目前數量,狀態,賣出日期,賣出價格,賣出數量,已實現損益,買入理由,賣出理由,買入大盤,賣出大盤,市場,交易方向,進場理由,預定進場價,初始停損價,情緒分數,出場理由,反思,R-Multiple"
+    static let csvHeader = "標的,買入日期,買入價格,原始數量,目前數量,狀態,賣出日期,賣出價格,賣出數量,已實現損益,買入理由,賣出理由,買入大盤,賣出大盤,市場,交易方向,進場理由,預定進場價,初始停損價,目標價,情緒分數,出場理由,反思,R-Multiple"
 
     /// 將單筆紀錄轉為 CSV 行（可選搭配交易日誌）
     func csvRow(journal: TradeJournal? = nil) -> String {
@@ -276,13 +307,14 @@ final class Investment {
                 escape(j.setup),
                 j.plannedEntryPrice.map { String(format: "%.2f", $0) } ?? "",
                 j.initialStopLoss.map { String(format: "%.2f", $0) } ?? "",
+                j.targetPrice.map { String(format: "%.2f", $0) } ?? "",
                 j.emotionScore.map { String($0) } ?? "",
                 escape(j.exitReason),
                 escape(j.reflection),
                 j.rMultiple.map { String(format: "%.2f", $0) } ?? ""
             ])
         } else {
-            fields.append(contentsOf: Array(repeating: "", count: 9))
+            fields.append(contentsOf: Array(repeating: "", count: 10))
         }
 
         return fields.joined(separator: ",")

@@ -77,9 +77,17 @@ final class TransactionHistoryViewModel {
         showingDeleteAlert = true
     }
 
+    var deleteErrorMessage: String? = nil
+    var showingDeleteError: Bool = false
+
     func deleteConfirmed(context: ModelContext) {
         guard let investment = investmentToDelete else { return }
-        Investment.deleteInvestment(investment, context: context)
+        do {
+            try Investment.deleteInvestment(investment, context: context)
+        } catch {
+            deleteErrorMessage = error.localizedDescription
+            showingDeleteError = true
+        }
     }
 
     // MARK: - Formatting

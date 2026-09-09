@@ -225,6 +225,7 @@ final class UnrealizedPnLChartViewModel {
                                 ticker: ticker,
                                 candle: CandleCacheData(
                                     dates: sorted.map(\.date),
+                                    opens: sorted.map(\.open),
                                     closes: sorted.map(\.close),
                                     highs: sorted.map(\.high),
                                     lows: sorted.map(\.low),

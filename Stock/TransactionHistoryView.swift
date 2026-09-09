@@ -71,6 +71,11 @@ struct TransactionHistoryView: View {
             } message: { investment in
                 Text("確定要刪除 \(StockMapping.displayName(for: investment.ticker)) 的買入紀錄嗎？相關的部分賣出紀錄也會一併刪除。")
             }
+            .alert("刪除失敗", isPresented: $vm.showingDeleteError) {
+                Button("確定", role: .cancel) {}
+            } message: {
+                Text(vm.deleteErrorMessage ?? "發生未知錯誤")
+            }
             .onAppear {
                 vm.allInvestments = allInvestments
                 vm.allRecordsForExport = allRecordsForExport

@@ -15,6 +15,8 @@ struct PortfolioListView: View {
            sort: \Investment.buyDate, order: .reverse)
     private var investments: [Investment]
 
+    @Query private var allJournals: [TradeJournal]
+
     @State private var vm = PortfolioListViewModel()
 
     var body: some View {
@@ -54,7 +56,8 @@ struct PortfolioListView: View {
                         displayName: vm.displayName(for: group.ticker),
                         highSinceBuy: vm.highSinceBuy[group.ticker],
                         institutionalData: vm.institutionalData[group.ticker],
-                        sellRecommendation: vm.sellRecommendation(for: group.ticker, avgCost: group.weightedAverageCost)
+                        sellRecommendation: vm.sellRecommendation(for: group.ticker, avgCost: group.weightedAverageCost),
+                        journalTarget: vm.journalTargets[group.ticker]
                     )
                 }
             }
@@ -68,16 +71,28 @@ struct PortfolioListView: View {
             } message: { investment in
                 Text("確定要刪除 \(StockMapping.displayName(for: investment.ticker)) 的買入紀錄嗎？相關的部分賣出紀錄也會一併刪除。")
             }
+            .alert("刪除失敗", isPresented: $vm.showingDeleteError) {
+                Button("確定", role: .cancel) {}
+            } message: {
+                Text(vm.deleteErrorMessage ?? "發生未知錯誤")
+            }
             .onAppear {
                 vm.investments = investments
+                vm.journals = allJournals
+                vm.buildJournalTargets()
                 vm.loadData()
             }
             .onChange(of: investments) { _, newValue in
                 vm.investments = newValue
+                vm.buildJournalTargets()
                 // 資料更新時重新載入（含首次 @Query 載入完成時）
                 if !newValue.isEmpty && !vm.hasAnyPrice {
                     vm.loadData()
                 }
+            }
+            .onChange(of: allJournals) { _, newValue in
+                vm.journals = newValue
+                vm.buildJournalTargets()
             }
         }
     }
@@ -316,7 +331,7 @@ struct PortfolioListView: View {
                         }
                         .lineLimit(1)
 
-                        // 技術信號標籤列
+                        // 技術信號標籤列（僅警示型 pills）
                         if let signal = vm.technicalSignals[group.ticker] {
                             FlowLayout(spacing: 4) {
                                 compactSignalBadges(signal, ticker: group.ticker, avgCost: group.weightedAverageCost)
@@ -386,6 +401,12 @@ struct PortfolioListView: View {
                                 .padding(.horizontal, 14)
                         }
 
+                        // 關鍵信號摘要
+                        if let signal = vm.technicalSignals[group.ticker] {
+                            expandedSignalSummary(signal, ticker: group.ticker)
+                                .padding(.horizontal, 14)
+                        }
+
                         // 操作列：現價輸入 + 按鈕
                         HStack(spacing: 8) {
                             // 現價手動修正
@@ -422,17 +443,6 @@ struct PortfolioListView: View {
                                     .clipShape(Capsule())
                             }
                             .buttonStyle(.plain)
-
-                            // 盤中分析
-                            NavigationLink(destination: IntradayAnalysisView(symbol: group.ticker)) {
-                                Text("盤中")
-                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 7)
-                                    .foregroundStyle(AppColor.secondary)
-                                    .background(AppColor.secondary.opacity(0.10))
-                                    .clipShape(Capsule())
-                            }
 
                             // 整批賣出
                             Button { vm.selectGroupForSell(group) } label: {
@@ -559,58 +569,10 @@ struct PortfolioListView: View {
 
     // MARK: - 技術指標信號顯示
 
-    /// 摺疊狀態下的精簡信號徽章（僅顯示重要觸發信號）
+    /// 摺疊狀態下的警示徽章（僅顯示需要行動的信號）
     @ViewBuilder
     private func compactSignalBadges(_ signal: TechnicalIndicators.SignalSummary, ticker: String, avgCost: Double) -> some View {
-        // 均線交叉
-        if let maCross = signal.maCross {
-            signalPill(maCross.label, color: maCross == .goldenCross ? AppColor.softUp : AppColor.softDown)
-        }
-        // MACD 交叉
-        if let macdSig = signal.macdSignal, let label = macdSig.label {
-            signalPill(label, color: macdSig == .goldenCross ? AppColor.softUp : AppColor.softDown)
-        }
-        // 超買超賣
-        if let rsiSig = signal.rsiSignal, let label = rsiSig.label {
-            signalPill(label, color: rsiSig == .overbought ? AppColor.softUp : AppColor.softDown)
-        }
-        // KD 交叉
-        if let kdjSig = signal.kdjSignal, let label = kdjSig.label {
-            signalPill(label, color: kdjSig == .goldenCross ? AppColor.softUp : AppColor.softDown)
-        }
-        // 布林通道
-        if let bbSig = signal.bollingerSignal, let label = bbSig.label {
-            signalPill(label, color: bbSig == .nearLower ? AppColor.softDown : (bbSig == .nearUpper ? AppColor.softUp : AppColor.primary))
-        }
-        // 量能異動
-        if let volSig = signal.volumeSignal, let label = volSig.label {
-            signalPill(label, color: volSig == .surge ? AppColor.softUp : (volSig == .shrink ? AppColor.textSecondary : AppColor.secondary))
-        }
-        // 52 週位置警示
-        if let stats = vm.weekStats[ticker],
-           let price = vm.currentPrice(for: ticker),
-           stats.high52w > stats.low52w {
-            let pct = (price - stats.low52w) / (stats.high52w - stats.low52w)
-            if pct >= 0.95 {
-                signalPill("近52W高", color: AppColor.softUp)
-            } else if pct <= 0.05 {
-                signalPill("近52W低", color: AppColor.softDown)
-            }
-        }
-        // 法人買賣超連續天數
-        if let inst = vm.institutionalData[ticker] {
-            let fs = inst.foreignStreak
-            if abs(fs) >= 2 {
-                signalPill("外資連\(fs > 0 ? "買" : "賣")\(abs(fs))日",
-                           color: fs > 0 ? AppColor.softUp : AppColor.softDown)
-            }
-            let ts = inst.trustStreak
-            if abs(ts) >= 2 {
-                signalPill("投信連\(ts > 0 ? "買" : "賣")\(abs(ts))日",
-                           color: ts > 0 ? AppColor.softUp : AppColor.softDown)
-            }
-        }
-        // 賣出建議（僅顯示偏空等級）
+        // 賣出建議（偏空等級）
         if let rec = vm.sellRecommendation(for: ticker, avgCost: avgCost) {
             switch rec.level {
             case .strongSell:
@@ -619,6 +581,80 @@ struct PortfolioListView: View {
                 signalPill(rec.level.shortLabel, color: .orange, filled: true)
             default:
                 EmptyView()
+            }
+        }
+        // 移動停利跌破 / 接近
+        if let price = vm.currentPrice(for: ticker),
+           let high = vm.highSinceBuy[ticker], high > 0 {
+            let pct = TradingFeeSettings.load().trailingStopPct
+            let rawStop = high * (1 - pct / 100)
+            let stopPrice = max(rawStop, avgCost)
+            if price <= stopPrice {
+                signalPill("跌破停利", color: AppColor.softDown, filled: true)
+            } else if price <= stopPrice * 1.03 {
+                signalPill("接近停利", color: .orange, filled: true)
+            }
+        }
+        // 停損跌破 / 接近
+        if let price = vm.currentPrice(for: ticker),
+           let jt = vm.journalTargets[ticker],
+           let sl = jt.stopLoss, sl > 0 {
+            if price <= sl {
+                signalPill("跌破停損", color: AppColor.softDown, filled: true)
+            } else if (price - sl) / sl * 100 <= 3 {
+                signalPill("接近停損", color: .orange, filled: true)
+            }
+        }
+        // 目標達成 / 接近
+        if let price = vm.currentPrice(for: ticker),
+           let jt = vm.journalTargets[ticker],
+           let tp = jt.targetPrice, tp > 0 {
+            if price >= tp {
+                signalPill("達標", color: AppColor.softUp, filled: true)
+            } else if (tp - price) / price * 100 <= 3 {
+                signalPill("接近目標", color: AppColor.softUp)
+            }
+        }
+    }
+
+    /// 展開狀態下的關鍵信號摘要（精簡 pills 行）
+    @ViewBuilder
+    private func expandedSignalSummary(_ signal: TechnicalIndicators.SignalSummary, ticker: String) -> some View {
+        FlowLayout(spacing: 4) {
+            // 均線交叉
+            if let maCross = signal.maCross {
+                signalPill(maCross.label, color: maCross == .goldenCross ? AppColor.softUp : AppColor.softDown)
+            }
+            // MACD 交叉
+            if let macdSig = signal.macdSignal, let label = macdSig.label {
+                signalPill(label, color: macdSig == .goldenCross ? AppColor.softUp : AppColor.softDown)
+            }
+            // KD 交叉
+            if let kdjSig = signal.kdjSignal, let label = kdjSig.label {
+                signalPill(label, color: kdjSig == .goldenCross ? AppColor.softUp : AppColor.softDown)
+            }
+            // RSI 超買超賣
+            if let rsiSig = signal.rsiSignal, let label = rsiSig.label {
+                signalPill(label, color: rsiSig == .overbought ? AppColor.softUp : AppColor.softDown)
+            }
+            // 52 週位置警示
+            if let stats = vm.weekStats[ticker],
+               let price = vm.currentPrice(for: ticker),
+               stats.high52w > stats.low52w {
+                let pct = (price - stats.low52w) / (stats.high52w - stats.low52w)
+                if pct >= 0.95 {
+                    signalPill("近52W高", color: AppColor.softUp)
+                } else if pct <= 0.05 {
+                    signalPill("近52W低", color: AppColor.softDown)
+                }
+            }
+            // 布林通道
+            if let bbSig = signal.bollingerSignal, let label = bbSig.label {
+                signalPill(label, color: bbSig == .nearLower ? AppColor.softDown : (bbSig == .nearUpper ? AppColor.softUp : AppColor.primary))
+            }
+            // 量能異動
+            if let volSig = signal.volumeSignal, let label = volSig.label {
+                signalPill(label, color: volSig == .surge ? AppColor.softUp : (volSig == .shrink ? AppColor.textSecondary : AppColor.secondary))
             }
         }
     }

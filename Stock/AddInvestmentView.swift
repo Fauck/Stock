@@ -327,18 +327,36 @@ struct AddInvestmentView: View {
                         iconColor: AppColor.secondary
                     )
 
-                    // 預定進場價 & 初始停損價
+                    // 預定進場價
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.right.circle")
+                                .font(.warmCaption2())
+                                .foregroundStyle(AppColor.secondary)
+                            Text("預定進場價")
+                                .font(.warmCaption())
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+                        TextField("0.00", text: $vm.plannedEntryPriceText)
+                            .keyboardType(.decimalPad)
+                            .font(.warmBody())
+                            .padding(10)
+                            .background(AppColor.background)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+
+                    // 目標價 & 初始停損價
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(spacing: 4) {
-                                Image(systemName: "arrow.right.circle")
+                                Image(systemName: "target")
                                     .font(.warmCaption2())
-                                    .foregroundStyle(AppColor.secondary)
-                                Text("預定進場價")
+                                    .foregroundStyle(AppColor.softUp)
+                                Text("目標價")
                                     .font(.warmCaption())
                                     .foregroundStyle(AppColor.textSecondary)
                             }
-                            TextField("0.00", text: $vm.plannedEntryPriceText)
+                            TextField("0.00", text: $vm.targetPriceText)
                                 .keyboardType(.decimalPad)
                                 .font(.warmBody())
                                 .padding(10)

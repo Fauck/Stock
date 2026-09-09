@@ -37,6 +37,12 @@ final class PortfolioListViewModel {
     var institutionalData: [String: StockService.InstitutionalSummary] = [:]
     var isFetchingInstitutional: Bool = false
 
+    /// 目標價 / 停損價（從交易日誌取得）[ticker: JournalTarget]
+    var journalTargets: [String: JournalTarget] = [:]
+
+    /// 交易日誌（由 View 的 @Query bridge 進來）
+    var journals: [TradeJournal] = []
+
     /// API 查到的中文名稱快取 [symbol: name]
     var stockNames: [String: String] = [:]
 
@@ -177,6 +183,43 @@ final class PortfolioListViewModel {
             foreignStreak: inst?.foreignStreak,
             trustStreak: inst?.trustStreak
         )
+    }
+
+    // MARK: - Journal Target (目標價 / 停損價)
+
+    struct JournalTarget {
+        let targetPrice: Double?
+        let stopLoss: Double?
+    }
+
+    /// 從 journals + investments 建立每個 ticker 的目標價/停損價
+    /// 同標的多筆 investment → 以最近一筆有填寫的 journal 為準
+    func buildJournalTargets() {
+        // 建立 investmentID → Investment 對照表（僅未平倉）
+        let activeInvestments = investments.filter { !$0.isClosed }
+        let investmentMap = Dictionary(uniqueKeysWithValues: activeInvestments.map { ($0.id, $0) })
+
+        // 建立 ticker → [journal] 對照（僅關聯到未平倉 investment 的 journals）
+        var tickerJournals: [String: [(date: Date, journal: TradeJournal)]] = [:]
+        for journal in journals {
+            guard let inv = investmentMap[journal.investmentID] else { continue }
+            let ticker = StockMapping.normalizedSymbol(for: inv.ticker)
+            tickerJournals[ticker, default: []].append((date: inv.buyDate, journal: journal))
+        }
+
+        var result: [String: JournalTarget] = [:]
+        for (ticker, entries) in tickerJournals {
+            // 按買入日期由新到舊排序
+            let sorted = entries.sorted { $0.date > $1.date }
+            // 取最近一筆有填寫 target 的
+            let target = sorted.first(where: { $0.journal.targetPrice != nil })?.journal.targetPrice
+            // 取最近一筆有填寫 stopLoss 的
+            let stop = sorted.first(where: { $0.journal.initialStopLoss != nil })?.journal.initialStopLoss
+            if target != nil || stop != nil {
+                result[ticker] = JournalTarget(targetPrice: target, stopLoss: stop)
+            }
+        }
+        journalTargets = result
     }
 
     // MARK: - Group Helpers
@@ -396,6 +439,7 @@ final class PortfolioListViewModel {
         struct CandleResult: Sendable {
             let ticker: String
             let dates: [String]
+            let opens: [Double]
             let closes: [Double]
             let highs: [Double]
             let lows: [Double]
@@ -413,6 +457,7 @@ final class PortfolioListViewModel {
                         return CandleResult(
                             ticker: ticker,
                             dates: sorted.map(\.date),
+                            opens: sorted.map(\.open),
                             closes: sorted.map(\.close),
                             highs: sorted.map(\.high),
                             lows: sorted.map(\.low),
@@ -436,8 +481,9 @@ final class PortfolioListViewModel {
         var mergedCache = existingCache
         for result in results {
             mergedCache[result.ticker] = CandleCacheData(
-                dates: result.dates, closes: result.closes,
-                highs: result.highs, lows: result.lows, volumes: result.volumes
+                dates: result.dates, opens: result.opens,
+                closes: result.closes, highs: result.highs,
+                lows: result.lows, volumes: result.volumes
             )
         }
 
@@ -473,6 +519,7 @@ final class PortfolioListViewModel {
             guard let candle = candles[ticker] else { continue }
 
             let summary = TechnicalIndicators.computeSignalSummary(
+                opens: candle.opens,
                 closes: candle.closes, highs: candle.highs, lows: candle.lows,
                 volumes: candle.volumes, settings: settings
             )
@@ -740,9 +787,17 @@ final class PortfolioListViewModel {
         showingDeleteAlert = true
     }
 
+    var deleteErrorMessage: String? = nil
+    var showingDeleteError: Bool = false
+
     func deleteConfirmed(context: ModelContext) {
         guard let investment = investmentToDelete else { return }
-        Investment.deleteInvestment(investment, context: context)
+        do {
+            try Investment.deleteInvestment(investment, context: context)
+        } catch {
+            deleteErrorMessage = error.localizedDescription
+            showingDeleteError = true
+        }
     }
 
     // MARK: - Formatting

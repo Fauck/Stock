@@ -73,6 +73,8 @@ final class TradeJournal {
     var plannedEntryPrice: Double?
     /// 初始停損價（最重要的一欄）
     var initialStopLoss: Double?
+    /// 目標價（預期出場價位）
+    var targetPrice: Double?
 
     // MARK: - 執行中 (Action)
 
@@ -96,6 +98,7 @@ final class TradeJournal {
         setup: String = "",
         plannedEntryPrice: Double? = nil,
         initialStopLoss: Double? = nil,
+        targetPrice: Double? = nil,
         emotionScore: Int? = nil,
         exitReason: String = "",
         reflection: String = "",
@@ -108,6 +111,7 @@ final class TradeJournal {
         self.setup = setup
         self.plannedEntryPrice = plannedEntryPrice
         self.initialStopLoss = initialStopLoss
+        self.targetPrice = targetPrice
         self.emotionScore = emotionScore
         self.exitReason = exitReason
         self.reflection = reflection
@@ -158,7 +162,7 @@ final class TradeJournal {
 
     // MARK: - CSV 匯出
 
-    static let csvHeader = "市場,交易方向,進場理由,預定進場價,初始停損價,情緒分數,出場理由,反思,R-Multiple"
+    static let csvHeader = "市場,交易方向,進場理由,預定進場價,初始停損價,目標價,情緒分數,出場理由,反思,R-Multiple"
 
     var csvRow: String {
         func escape(_ s: String) -> String {
@@ -174,6 +178,7 @@ final class TradeJournal {
             escape(setup),
             plannedEntryPrice.map { String(format: "%.2f", $0) } ?? "",
             initialStopLoss.map { String(format: "%.2f", $0) } ?? "",
+            targetPrice.map { String(format: "%.2f", $0) } ?? "",
             emotionScore.map { String($0) } ?? "",
             escape(exitReason),
             escape(reflection),
@@ -192,6 +197,7 @@ final class TradeJournal {
             setup: setup,
             plannedEntryPrice: plannedEntryPrice,
             initialStopLoss: initialStopLoss,
+            targetPrice: targetPrice,
             emotionScore: emotionScore,
             exitReason: exitReason,
             reflection: reflection,
@@ -208,6 +214,7 @@ final class TradeJournal {
             setup: c.setup,
             plannedEntryPrice: c.plannedEntryPrice,
             initialStopLoss: c.initialStopLoss,
+            targetPrice: c.targetPrice,
             emotionScore: c.emotionScore,
             exitReason: c.exitReason,
             reflection: c.reflection,
@@ -227,6 +234,7 @@ struct CodableTradeJournal: Codable, Sendable {
     let setup: String
     let plannedEntryPrice: Double?
     let initialStopLoss: Double?
+    let targetPrice: Double?
     let emotionScore: Int?
     let exitReason: String
     let reflection: String

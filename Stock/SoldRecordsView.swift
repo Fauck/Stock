@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import Charts
 
 // MARK: - 已賣出紀錄頁面（日誌風格）
 
@@ -53,6 +54,11 @@ struct SoldRecordsView: View {
                 } else {
                     Text("確定要刪除 \(StockMapping.displayName(for: investment.ticker)) 的已平倉紀錄嗎？")
                 }
+            }
+            .alert("刪除失敗", isPresented: $vm.showingDeleteError) {
+                Button("確定", role: .cancel) {}
+            } message: {
+                Text(vm.deleteErrorMessage ?? "發生未知錯誤")
             }
             .onAppear {
                 vm.allSoldInvestments = allSoldInvestments
@@ -152,7 +158,28 @@ struct SoldRecordsView: View {
                 profitLossSummaryCard
                     .padding(.horizontal, 16)
 
+                // 交易統計
+                if vm.recordCount >= 2 {
+                    tradeStatsCard
+                        .padding(.horizontal, 16)
+                }
+
+                // 月度損益柱狀圖
+                if !vm.monthlyPLData.isEmpty {
+                    monthlyChartCard
+                        .padding(.horizontal, 16)
+                }
+
+                // 依標的彙總
+                if !vm.tickerSummaries.isEmpty {
+                    tickerSummaryCard
+                        .padding(.horizontal, 16)
+                }
+
                 // 個別紀錄
+                sectionHeader("交易明細", icon: "list.bullet.rectangle")
+                    .padding(.horizontal, 16)
+
                 ForEach(vm.filteredInvestments) { investment in
                     soldRecordCard(for: investment)
                         .contextMenu {
@@ -167,6 +194,21 @@ struct SoldRecordsView: View {
             }
             .padding(.vertical, 12)
         }
+    }
+
+    // MARK: - Section Header
+
+    private func sectionHeader(_ title: String, icon: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.warmCaption2())
+                .foregroundStyle(AppColor.primary)
+            Text(title)
+                .font(.warmCaption())
+                .foregroundStyle(AppColor.textSecondary)
+            Spacer()
+        }
+        .padding(.top, 4)
     }
 
     // MARK: - 損益總覽卡片
@@ -220,6 +262,217 @@ struct SoldRecordsView: View {
             }
         }
         .cardStyle()
+    }
+
+    // MARK: - 交易統計卡片
+
+    private var tradeStatsCard: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "chart.bar.doc.horizontal")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("交易統計")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+            }
+
+            // 勝率 + 盈虧比
+            HStack(spacing: 0) {
+                statCell(title: "勝率", value: String(format: "%.0f%%", vm.winRate),
+                         color: vm.winRate >= 50 ? AppColor.softUp : AppColor.softDown)
+                statCell(title: "盈虧比", value: vm.profitLossRatio > 0 ? String(format: "1:%.1f", vm.profitLossRatio) : "-",
+                         color: vm.profitLossRatio >= 1 ? AppColor.softUp : (vm.profitLossRatio > 0 ? AppColor.softDown : AppColor.textSecondary))
+                statCell(title: "勝 / 負", value: "\(vm.winCount) / \(vm.lossCount)",
+                         color: AppColor.textMain)
+            }
+
+            AppColor.divider.frame(height: 1)
+
+            // 平均獲利/虧損 + 最大連虧
+            HStack(spacing: 0) {
+                statCell(title: "平均獲利", value: String(format: "+$%.0f", vm.avgProfit),
+                         color: AppColor.softUp)
+                statCell(title: "平均虧損", value: String(format: "-$%.0f", vm.avgLoss),
+                         color: AppColor.softDown)
+                statCell(title: "最大連虧", value: "\(vm.maxConsecutiveLosses) 筆",
+                         color: vm.maxConsecutiveLosses >= 3 ? AppColor.softDown : AppColor.textMain)
+            }
+
+            AppColor.divider.frame(height: 1)
+
+            // 最大單筆 + 持有天數
+            HStack(spacing: 0) {
+                statCell(title: "最大獲利", value: String(format: "+$%.0f", vm.maxSingleProfit),
+                         color: AppColor.softUp)
+                statCell(title: "最大虧損", value: String(format: "$%.0f", vm.maxSingleLoss),
+                         color: AppColor.softDown)
+                statCell(title: "持有天(勝/負)",
+                         value: "\(vm.avgHoldingDaysWin) / \(vm.avgHoldingDaysLoss)",
+                         color: AppColor.textMain)
+            }
+        }
+        .cardStyle()
+    }
+
+    private func statCell(title: String, value: String, color: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(title)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(AppColor.textSecondary)
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - 月度損益柱狀圖
+
+    private var monthlyChartCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("月度損益")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+            }
+
+            Chart(vm.monthlyPLData) { month in
+                if month.profit > 0 {
+                    BarMark(
+                        x: .value("月份", month.label),
+                        y: .value("獲利", month.profit)
+                    )
+                    .foregroundStyle(AppColor.softUp.opacity(0.8))
+                }
+                if month.loss < 0 {
+                    BarMark(
+                        x: .value("月份", month.label),
+                        y: .value("虧損", month.loss)
+                    )
+                    .foregroundStyle(AppColor.softDown.opacity(0.8))
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading) { value in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4]))
+                        .foregroundStyle(AppColor.divider)
+                    AxisValueLabel {
+                        if let v = value.as(Double.self) {
+                            Text(Self.abbreviatedAmount(v))
+                                .font(.system(size: 8, design: .rounded))
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+                    }
+                }
+            }
+            .chartXAxis {
+                AxisMarks { value in
+                    AxisValueLabel {
+                        if let label = value.as(String.self) {
+                            Text(label)
+                                .font(.system(size: 8, design: .rounded))
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+                    }
+                }
+            }
+            .frame(height: 160)
+        }
+        .cardStyle()
+    }
+
+    /// 金額縮寫（千/萬）
+    private static func abbreviatedAmount(_ value: Double) -> String {
+        let abs = Swift.abs(value)
+        let sign = value < 0 ? "-" : ""
+        if abs >= 10_000 {
+            return "\(sign)\(String(format: "%.0f", value / 10_000))萬"
+        } else if abs >= 1_000 {
+            return "\(sign)\(String(format: "%.0f", value / 1_000))千"
+        } else {
+            return "\(sign)\(String(format: "%.0f", value))"
+        }
+    }
+
+    // MARK: - 依標的彙總
+
+    private var tickerSummaryCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "building.2")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("標的彙總")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+                Text("依損益排序")
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            ForEach(vm.tickerSummaries) { summary in
+                HStack(spacing: 8) {
+                    // 標的名稱
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(summary.displayName)
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(AppColor.textMain)
+                            .lineLimit(1)
+                        Text("\(summary.tradeCount)筆 · 勝率\(String(format: "%.0f", summary.winRate))%")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppColor.textSecondary)
+                    }
+                    .frame(minWidth: 80, alignment: .leading)
+
+                    Spacer()
+
+                    // 損益條
+                    tickerPLBar(pl: summary.totalPL)
+
+                    // 損益金額
+                    Text(String(format: "%@$%.0f", summary.totalPL >= 0 ? "+" : "", summary.totalPL))
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.profitLossColor(summary.totalPL))
+                        .frame(minWidth: 70, alignment: .trailing)
+                }
+                .padding(.vertical, 2)
+
+                if summary.id != vm.tickerSummaries.last?.id {
+                    AppColor.divider.frame(height: 0.5)
+                }
+            }
+        }
+        .cardStyle()
+    }
+
+    /// 標的損益水平條
+    private func tickerPLBar(pl: Double) -> some View {
+        let maxPL = vm.tickerSummaries.map { abs($0.totalPL) }.max() ?? 1
+        let ratio = min(abs(pl) / maxPL, 1.0)
+        let color: Color = pl >= 0 ? AppColor.softUp : AppColor.softDown
+
+        return GeometryReader { geo in
+            let barWidth = geo.size.width * ratio
+            ZStack(alignment: pl >= 0 ? .leading : .trailing) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(AppColor.divider)
+                    .frame(height: 6)
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(color.opacity(0.6))
+                    .frame(width: max(barWidth, 2), height: 6)
+            }
+        }
+        .frame(height: 6)
+        .frame(maxWidth: 80)
     }
 
     // MARK: - 單筆已賣出紀錄卡片
