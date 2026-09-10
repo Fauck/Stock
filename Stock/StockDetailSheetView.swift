@@ -11,13 +11,13 @@ import SwiftData
 struct StockDetailSheetView: View {
     let group: PortfolioGroup
     let signal: TechnicalIndicators.SignalSummary?
-    let weekStats: PortfolioListViewModel.WeekStats?
+    let weekStats: WeekStats?
     let currentPrice: Double?
     let displayName: String
     let highSinceBuy: Double?
     let institutionalData: StockService.InstitutionalSummary?
     let sellRecommendation: TechnicalIndicators.SellRecommendation?
-    let journalTarget: PortfolioListViewModel.JournalTarget?
+    let journalTarget: JournalTarget?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -29,7 +29,7 @@ struct StockDetailSheetView: View {
     @State private var showingTargetStopEdit = false
 
     /// 動態計算目標/停損（從 @Query 即時讀取，編輯後自動更新）
-    private var liveJournalTarget: PortfolioListViewModel.JournalTarget? {
+    private var liveJournalTarget: JournalTarget? {
         let investmentIDs = Set(allInvestments.filter { $0.ticker == group.ticker }.map(\.id))
         let matchingJournals = allJournals.filter { investmentIDs.contains($0.investmentID) }
         var targetPrice: Double? = nil
@@ -40,19 +40,19 @@ struct StockDetailSheetView: View {
             if targetPrice != nil && stopLoss != nil { break }
         }
         if targetPrice == nil && stopLoss == nil { return nil }
-        return PortfolioListViewModel.JournalTarget(targetPrice: targetPrice, stopLoss: stopLoss)
+        return JournalTarget(targetPrice: targetPrice, stopLoss: stopLoss)
     }
 
     init(
         group: PortfolioGroup,
         signal: TechnicalIndicators.SignalSummary?,
-        weekStats: PortfolioListViewModel.WeekStats?,
+        weekStats: WeekStats?,
         currentPrice: Double?,
         displayName: String,
         highSinceBuy: Double? = nil,
         institutionalData: StockService.InstitutionalSummary? = nil,
         sellRecommendation: TechnicalIndicators.SellRecommendation? = nil,
-        journalTarget: PortfolioListViewModel.JournalTarget? = nil
+        journalTarget: JournalTarget? = nil
     ) {
         self.group = group
         self.signal = signal
@@ -872,7 +872,7 @@ struct StockDetailSheetView: View {
 
     // MARK: - 目標 / 停損
 
-    private func targetStopSection(currentPrice: Double, target jt: PortfolioListViewModel.JournalTarget, avgCost: Double) -> some View {
+    private func targetStopSection(currentPrice: Double, target jt: JournalTarget, avgCost: Double) -> some View {
         let tp = jt.targetPrice
         let sl = jt.stopLoss
 
@@ -1278,7 +1278,7 @@ struct StockDetailSheetView: View {
 
     // MARK: - 52 週區間
 
-    private func weekStatsSection(_ stats: PortfolioListViewModel.WeekStats) -> some View {
+    private func weekStatsSection(_ stats: WeekStats) -> some View {
         let range = stats.high52w - stats.low52w
 
         return VStack(alignment: .leading, spacing: 8) {

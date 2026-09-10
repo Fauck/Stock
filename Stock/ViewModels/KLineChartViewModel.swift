@@ -38,13 +38,6 @@ final class KLineChartViewModel {
 
     // MARK: - Date Formatters
 
-    private static let apiDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
-
     private static let labelDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "MM/dd"
@@ -140,8 +133,8 @@ final class KLineChartViewModel {
             clampedStart = calendar.date(byAdding: .month, value: -6, to: endDate) ?? endDate
         }
 
-        let fromStr = Self.apiDateFormatter.string(from: clampedStart)
-        let toStr = Self.apiDateFormatter.string(from: endDate)
+        let fromStr = AppDateFormatter.apiDate.string(from: clampedStart)
+        let toStr = AppDateFormatter.apiDate.string(from: endDate)
 
         let symbol = StockMapping.resolve(ticker).symbol
 
@@ -153,7 +146,7 @@ final class KLineChartViewModel {
             )
 
             let items = response.data.compactMap { candle -> CandleItem? in
-                guard let date = Self.apiDateFormatter.date(from: candle.date) else { return nil }
+                guard let date = AppDateFormatter.apiDate.date(from: candle.date) else { return nil }
                 return CandleItem(
                     id: candle.date,
                     date: date,

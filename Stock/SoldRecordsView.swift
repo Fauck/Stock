@@ -18,7 +18,16 @@ struct SoldRecordsView: View {
            sort: \Investment.buyDate, order: .reverse)
     private var allSoldInvestments: [Investment]
 
+    @Query(filter: #Predicate<Investment> { !$0.isClosed })
+    private var openInvestments: [Investment]
+
     @State private var vm = SoldRecordsViewModel()
+    @State private var unrealizedVM = UnrealizedPnLChartViewModel()
+    @State private var selectedSegment: PnLSegment = .realized
+
+    // 未實現損益自訂日期暫存
+    @State private var unrealizedCustomStart: Date = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
+    @State private var unrealizedCustomEnd: Date = Date()
 
     var body: some View {
         NavigationStack {
@@ -26,14 +35,16 @@ struct SoldRecordsView: View {
                 AppColor.background.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    filterBar
+                    segmentPicker
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .padding(.bottom, 4)
 
-                    if vm.filteredInvestments.isEmpty {
-                        Spacer()
-                        emptyState
-                        Spacer()
-                    } else {
-                        recordsList
+                    switch selectedSegment {
+                    case .realized:
+                        realizedContent
+                    case .unrealized:
+                        unrealizedContent
                     }
                 }
             }
@@ -62,9 +73,66 @@ struct SoldRecordsView: View {
             }
             .onAppear {
                 vm.allSoldInvestments = allSoldInvestments
+                unrealizedVM.openInvestments = openInvestments
             }
             .onChange(of: allSoldInvestments) { _, newValue in
                 vm.allSoldInvestments = newValue
+            }
+            .onChange(of: openInvestments) { _, newValue in
+                unrealizedVM.openInvestments = newValue
+            }
+            .onChange(of: selectedSegment) { _, newValue in
+                if newValue == .unrealized && unrealizedVM.chartData.isEmpty && !unrealizedVM.openInvestments.isEmpty {
+                    Task { await unrealizedVM.loadCandleData() }
+                }
+            }
+        }
+    }
+
+    // MARK: - 分頁切換
+
+    private var segmentPicker: some View {
+        HStack(spacing: 0) {
+            ForEach(PnLSegment.allCases) { segment in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        selectedSegment = segment
+                    }
+                } label: {
+                    Text(segment.rawValue)
+                        .font(.warmSubheadline())
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            selectedSegment == segment
+                                ? AppColor.primary
+                                : AppColor.cardBackground
+                        )
+                        .foregroundStyle(
+                            selectedSegment == segment
+                                ? .white
+                                : AppColor.textMain
+                        )
+                }
+            }
+        }
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+    }
+
+    // MARK: - 已實現損益內容
+
+    private var realizedContent: some View {
+        VStack(spacing: 0) {
+            filterBar
+
+            if vm.filteredInvestments.isEmpty {
+                Spacer()
+                emptyState
+                Spacer()
+            } else {
+                recordsList
             }
         }
     }
@@ -164,9 +232,15 @@ struct SoldRecordsView: View {
                         .padding(.horizontal, 16)
                 }
 
-                // 月度損益柱狀圖
-                if !vm.monthlyPLData.isEmpty {
-                    monthlyChartCard
+                // 累計損益曲線
+                if !vm.cumulativeData.isEmpty {
+                    cumulativeChart
+                        .padding(.horizontal, 16)
+                }
+
+                // 月度/季度損益柱狀圖
+                if !vm.periodData.isEmpty {
+                    periodChart
                         .padding(.horizontal, 16)
                 }
 
@@ -330,75 +404,238 @@ struct SoldRecordsView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - 月度損益柱狀圖
+    // MARK: - 累計損益曲線
 
-    private var monthlyChartCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "chart.bar.fill")
-                    .font(.warmCaption2())
+    private var cumulativeChart: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "waveform.path.ecg")
+                    .font(.warmCaption())
                     .foregroundStyle(AppColor.primary)
-                Text("月度損益")
+                Text("累計損益曲線")
+                    .font(.warmHeadline())
+                    .foregroundStyle(AppColor.textMain)
+            }
+
+            let data = vm.cumulativeData
+
+            if data.isEmpty {
+                Text("篩選區間內無資料")
                     .font(.warmCaption())
                     .foregroundStyle(AppColor.textSecondary)
-                Spacer()
-            }
+                    .frame(maxWidth: .infinity, minHeight: 200)
+            } else {
+                Chart {
+                    ForEach(data) { point in
+                        LineMark(
+                            x: .value("日期", point.date),
+                            y: .value("累計損益", point.cumulativePnL)
+                        )
+                        .foregroundStyle(AppColor.primary)
+                        .interpolationMethod(.catmullRom)
 
-            Chart(vm.monthlyPLData) { month in
-                if month.profit > 0 {
-                    BarMark(
-                        x: .value("月份", month.label),
-                        y: .value("獲利", month.profit)
-                    )
-                    .foregroundStyle(AppColor.softUp.opacity(0.8))
+                        AreaMark(
+                            x: .value("日期", point.date),
+                            yStart: .value("零線", 0),
+                            yEnd: .value("累計損益", point.cumulativePnL)
+                        )
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [
+                                    (point.cumulativePnL >= 0 ? AppColor.softUp : AppColor.softDown).opacity(0.3),
+                                    (point.cumulativePnL >= 0 ? AppColor.softUp : AppColor.softDown).opacity(0.05)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .interpolationMethod(.catmullRom)
+                    }
+
+                    RuleMark(y: .value("零線", 0))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        .foregroundStyle(AppColor.textSecondary.opacity(0.5))
                 }
-                if month.loss < 0 {
-                    BarMark(
-                        x: .value("月份", month.label),
-                        y: .value("虧損", month.loss)
-                    )
-                    .foregroundStyle(AppColor.softDown.opacity(0.8))
-                }
-            }
-            .chartYAxis {
-                AxisMarks(position: .leading) { value in
-                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4]))
-                        .foregroundStyle(AppColor.divider)
-                    AxisValueLabel {
-                        if let v = value.as(Double.self) {
-                            Text(Self.abbreviatedAmount(v))
-                                .font(.system(size: 8, design: .rounded))
-                                .foregroundStyle(AppColor.textSecondary)
+                .chartYAxis {
+                    AxisMarks(position: .leading) { value in
+                        AxisValueLabel {
+                            if let v = value.as(Double.self) {
+                                Text(formatAmount(v))
+                                    .font(.warmCaption2())
+                                    .foregroundStyle(AppColor.textSecondary)
+                            }
                         }
+                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                            .foregroundStyle(AppColor.divider)
                     }
                 }
-            }
-            .chartXAxis {
-                AxisMarks { value in
-                    AxisValueLabel {
-                        if let label = value.as(String.self) {
-                            Text(label)
-                                .font(.system(size: 8, design: .rounded))
-                                .foregroundStyle(AppColor.textSecondary)
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 5)) { value in
+                        AxisValueLabel {
+                            if let date = value.as(Date.self) {
+                                Text(formatChartDate(date))
+                                    .font(.warmCaption2())
+                                    .foregroundStyle(AppColor.textSecondary)
+                            }
                         }
+                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                            .foregroundStyle(AppColor.divider)
                     }
                 }
+                .frame(height: 220)
             }
-            .frame(height: 160)
         }
         .cardStyle()
     }
 
-    /// 金額縮寫（千/萬）
-    private static func abbreviatedAmount(_ value: Double) -> String {
-        let abs = Swift.abs(value)
-        let sign = value < 0 ? "-" : ""
-        if abs >= 10_000 {
-            return "\(sign)\(String(format: "%.0f", value / 10_000))萬"
-        } else if abs >= 1_000 {
-            return "\(sign)\(String(format: "%.0f", value / 1_000))千"
-        } else {
-            return "\(sign)\(String(format: "%.0f", value))"
+    // MARK: - 月度/季度柱狀圖
+
+    private var periodChart: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.primary)
+                Text("損益分佈")
+                    .font(.warmHeadline())
+                    .foregroundStyle(AppColor.textMain)
+                Spacer()
+
+                // 月度/季度切換
+                HStack(spacing: 0) {
+                    ForEach(PeriodMode.allCases) { mode in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                vm.periodMode = mode
+                            }
+                        } label: {
+                            Text(mode.rawValue)
+                                .font(.warmCaption2())
+                                .fontWeight(.medium)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    vm.periodMode == mode
+                                        ? AppColor.primary
+                                        : Color.clear
+                                )
+                                .foregroundStyle(
+                                    vm.periodMode == mode
+                                        ? .white
+                                        : AppColor.textMain
+                                )
+                        }
+                    }
+                }
+                .background(AppColor.background)
+                .clipShape(Capsule())
+            }
+
+            let data = vm.periodData
+
+            if data.isEmpty {
+                Text("篩選區間內無資料")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+                    .frame(maxWidth: .infinity, minHeight: 200)
+            } else {
+                Chart {
+                    ForEach(data) { period in
+                        BarMark(
+                            x: .value("期間", period.label),
+                            y: .value("損益", period.pnl)
+                        )
+                        .foregroundStyle(period.pnl >= 0 ? AppColor.softUp : AppColor.softDown)
+                        .cornerRadius(4)
+                    }
+
+                    RuleMark(y: .value("零線", 0))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        .foregroundStyle(AppColor.textSecondary.opacity(0.5))
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { value in
+                        AxisValueLabel {
+                            if let v = value.as(Double.self) {
+                                Text(formatAmount(v))
+                                    .font(.warmCaption2())
+                                    .foregroundStyle(AppColor.textSecondary)
+                            }
+                        }
+                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                            .foregroundStyle(AppColor.divider)
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks { value in
+                        AxisValueLabel {
+                            if let label = value.as(String.self) {
+                                Text(label)
+                                    .font(.warmCaption2())
+                                    .foregroundStyle(AppColor.textSecondary)
+                                    .rotationEffect(.degrees(-30))
+                            }
+                        }
+                    }
+                }
+                .frame(height: 220)
+
+                // 明細列表
+                periodDetailList(data: data)
+            }
+        }
+        .cardStyle()
+    }
+
+    // MARK: - 期間明細列表
+
+    private func periodDetailList(data: [PeriodPnL]) -> some View {
+        VStack(spacing: 0) {
+            AppColor.divider.frame(height: 1)
+                .padding(.vertical, 8)
+
+            ForEach(data) { period in
+                HStack {
+                    Text(period.label)
+                        .font(.warmCaption())
+                        .foregroundStyle(AppColor.textMain)
+                        .frame(width: 60, alignment: .leading)
+
+                    // 勝率條
+                    let winRate = period.tradeCount > 0
+                        ? Double(period.winCount) / Double(period.tradeCount)
+                        : 0
+                    GeometryReader { geo in
+                        HStack(spacing: 1) {
+                            if winRate > 0 {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(AppColor.softUp.opacity(0.6))
+                                    .frame(width: max(geo.size.width * winRate, 2))
+                            }
+                            if winRate < 1 {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(AppColor.softDown.opacity(0.4))
+                                    .frame(width: max(geo.size.width * (1 - winRate), 2))
+                            }
+                        }
+                    }
+                    .frame(height: 6)
+                    .frame(maxWidth: 60)
+
+                    Text("\(period.winCount)/\(period.tradeCount)")
+                        .font(.warmCaption2())
+                        .foregroundStyle(AppColor.textSecondary)
+                        .frame(width: 35, alignment: .center)
+
+                    Spacer()
+
+                    Text("\(period.pnl >= 0 ? "+" : "")$\(period.pnl, specifier: "%.0f")")
+                        .font(.warmCaption())
+                        .fontWeight(.medium)
+                        .foregroundStyle(Color.profitLossColor(period.pnl))
+                }
+                .padding(.vertical, 4)
+            }
         }
     }
 
@@ -539,6 +776,300 @@ struct SoldRecordsView: View {
             }
         }
         .cardStyle()
+    }
+
+    // MARK: - 未實現損益內容
+
+    private var unrealizedContent: some View {
+        Group {
+            if unrealizedVM.openInvestments.isEmpty {
+                VStack {
+                    Spacer()
+                    unrealizedEmptyState
+                    Spacer()
+                }
+            } else {
+                ScrollView {
+                    VStack(spacing: 16) {
+                        unrealizedFilterBar
+                        unrealizedSummaryCard
+                        unrealizedChart
+                    }
+                    .padding(16)
+                }
+            }
+        }
+    }
+
+    // MARK: - 未實現空狀態
+
+    private var unrealizedEmptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "chart.line.flattrend.xyaxis")
+                .font(.system(size: 48))
+                .foregroundStyle(AppColor.textSecondary.opacity(0.4))
+            Text("尚無持有中部位")
+                .font(.warmSubheadline())
+                .foregroundStyle(AppColor.textSecondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 300)
+    }
+
+    // MARK: - 未實現日期篩選
+
+    private var unrealizedFilterBar: some View {
+        VStack(spacing: 10) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(DateFilterOption.allCases) { option in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                unrealizedVM.selectedFilter = option
+                            }
+                        } label: {
+                            Text(option.rawValue)
+                                .font(.warmCaption())
+                                .fontWeight(.medium)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(
+                                    unrealizedVM.selectedFilter == option
+                                        ? AppColor.primary
+                                        : AppColor.cardBackground
+                                )
+                                .foregroundStyle(
+                                    unrealizedVM.selectedFilter == option
+                                        ? .white
+                                        : AppColor.textMain
+                                )
+                                .clipShape(Capsule())
+                                .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+                        }
+                    }
+                }
+            }
+
+            if unrealizedVM.selectedFilter == .custom {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("起始日期")
+                            .font(.warmCaption2())
+                            .foregroundStyle(AppColor.textSecondary)
+                        DatePicker("", selection: $unrealizedCustomStart, displayedComponents: .date)
+                            .labelsHidden()
+                            .tint(AppColor.primary)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("結束日期")
+                            .font(.warmCaption2())
+                            .foregroundStyle(AppColor.textSecondary)
+                        DatePicker("", selection: $unrealizedCustomEnd, displayedComponents: .date)
+                            .labelsHidden()
+                            .tint(AppColor.primary)
+                    }
+                    Button {
+                        unrealizedVM.customStartDate = unrealizedCustomStart
+                        unrealizedVM.customEndDate = unrealizedCustomEnd
+                    } label: {
+                        Text("確認")
+                            .font(.warmCaption())
+                            .fontWeight(.semibold)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(AppColor.primary)
+                            .foregroundStyle(.white)
+                            .clipShape(Capsule())
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    // MARK: - 未實現摘要卡片
+
+    private var unrealizedSummaryCard: some View {
+        let s = unrealizedVM.summary
+        return VStack(spacing: 12) {
+            HStack {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .foregroundStyle(AppColor.primary)
+                Text("持倉摘要")
+                    .font(.warmHeadline())
+                    .foregroundStyle(AppColor.textMain)
+                Spacer()
+                Text("\(s.positionCount) 檔持有")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            AppColor.divider.frame(height: 1)
+
+            HStack {
+                Text("未實現損益")
+                    .font(.warmSubheadline())
+                    .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+                Text("\(s.currentPnL >= 0 ? "+" : "")$\(s.currentPnL, specifier: "%.0f")")
+                    .font(.warmLargeNumber())
+                    .foregroundStyle(Color.profitLossColor(s.currentPnL))
+            }
+
+            HStack(spacing: 0) {
+                statBadge(title: "報酬率",
+                          value: String(format: "%.1f%%", s.returnPct),
+                          color: Color.profitLossColor(s.returnPct))
+                Spacer()
+                statBadge(title: "區間高點",
+                          value: formatAmount(s.peakPnL),
+                          color: AppColor.softUp)
+                Spacer()
+                statBadge(title: "區間低點",
+                          value: formatAmount(s.troughPnL),
+                          color: AppColor.softDown)
+                Spacer()
+                statBadge(title: "投入成本",
+                          value: formatAmount(s.totalCost),
+                          color: AppColor.textMain)
+            }
+        }
+        .cardStyle()
+    }
+
+    // MARK: - 未實現損益走勢圖
+
+    private var unrealizedChart: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "waveform.path.ecg")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.primary)
+                Text("未實現損益走勢")
+                    .font(.warmHeadline())
+                    .foregroundStyle(AppColor.textMain)
+                Spacer()
+                if unrealizedVM.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                }
+            }
+
+            if unrealizedVM.isLoading && unrealizedVM.chartData.isEmpty {
+                ProgressView("載入歷史資料中...")
+                    .font(.warmCaption())
+                    .frame(maxWidth: .infinity, minHeight: 220)
+            } else {
+                let data = unrealizedVM.chartData
+
+                if data.isEmpty {
+                    Text("無歷史資料")
+                        .font(.warmCaption())
+                        .foregroundStyle(AppColor.textSecondary)
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                } else {
+                    Chart {
+                        ForEach(data) { point in
+                            LineMark(
+                                x: .value("日期", point.date),
+                                y: .value("未實現損益", point.totalUnrealizedPnL)
+                            )
+                            .foregroundStyle(AppColor.primary)
+                            .interpolationMethod(.catmullRom)
+
+                            AreaMark(
+                                x: .value("日期", point.date),
+                                yStart: .value("零線", 0),
+                                yEnd: .value("未實現損益", point.totalUnrealizedPnL)
+                            )
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [
+                                        (point.totalUnrealizedPnL >= 0
+                                            ? AppColor.softUp : AppColor.softDown).opacity(0.3),
+                                        (point.totalUnrealizedPnL >= 0
+                                            ? AppColor.softUp : AppColor.softDown).opacity(0.05)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .interpolationMethod(.catmullRom)
+                        }
+
+                        RuleMark(y: .value("零線", 0))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .foregroundStyle(AppColor.textSecondary.opacity(0.5))
+                    }
+                    .chartYAxis {
+                        AxisMarks(position: .leading) { value in
+                            AxisValueLabel {
+                                if let v = value.as(Double.self) {
+                                    Text(formatAmount(v))
+                                        .font(.warmCaption2())
+                                        .foregroundStyle(AppColor.textSecondary)
+                                }
+                            }
+                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                                .foregroundStyle(AppColor.divider)
+                        }
+                    }
+                    .chartXAxis {
+                        AxisMarks(values: .automatic(desiredCount: 5)) { value in
+                            AxisValueLabel {
+                                if let date = value.as(Date.self) {
+                                    Text(formatChartDate(date))
+                                        .font(.warmCaption2())
+                                        .foregroundStyle(AppColor.textSecondary)
+                                }
+                            }
+                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                                .foregroundStyle(AppColor.divider)
+                        }
+                    }
+                    .frame(height: 220)
+                }
+            }
+        }
+        .cardStyle()
+    }
+
+    // MARK: - 共用元件
+
+    private func statBadge(title: String, value: String, color: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(title)
+                .font(.warmCaption2())
+                .foregroundStyle(AppColor.textSecondary)
+            Text(value)
+                .font(.warmCaption())
+                .fontWeight(.medium)
+                .foregroundStyle(color)
+        }
+    }
+
+    // MARK: - 格式化工具
+
+    private func formatAmount(_ value: Double) -> String {
+        let abs = Swift.abs(value)
+        let sign = value < 0 ? "-" : ""
+        if abs >= 10000 {
+            return "\(sign)\(String(format: "%.1f", abs / 10000))萬"
+        } else if abs >= 1000 {
+            return "\(sign)\(String(format: "%.1f", abs / 1000))K"
+        } else {
+            return "\(sign)\(String(format: "%.0f", abs))"
+        }
+    }
+
+    private static let chartDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MM/dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    private func formatChartDate(_ date: Date) -> String {
+        Self.chartDateFormatter.string(from: date)
     }
 }
 

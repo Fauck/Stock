@@ -16,21 +16,13 @@ struct ToolboxView: View {
 
                 ScrollView {
                     VStack(spacing: 12) {
-                        toolCard(
-                            title: "盤中分析",
-                            subtitle: "當日分價量表、成交明細與大單追蹤",
-                            icon: "waveform.path.ecg",
-                            iconColor: AppColor.secondary,
-                            destination: IntradayAnalysisView()
-                        )
-
-                        toolCard(
-                            title: "損益走勢圖",
-                            subtitle: "已實現與未實現損益曲線、月度績效走勢",
-                            icon: "chart.line.uptrend.xyaxis",
-                            iconColor: AppColor.secondary,
-                            destination: PnLChartView()
-                        )
+//                        toolCard(
+//                            title: "盤中分析",
+//                            subtitle: "當日分價量表、成交明細與大單追蹤",
+//                            icon: "waveform.path.ecg",
+//                            iconColor: AppColor.secondary,
+//                            destination: IntradayAnalysisView()
+//                        )
 
                         toolCard(
                             title: "交易日誌",
@@ -46,6 +38,14 @@ struct ToolboxView: View {
                             icon: "house.fill",
                             iconColor: AppColor.primary,
                             destination: MortgageCalculatorView()
+                        )
+
+                        toolCard(
+                            title: "買入分析",
+                            subtitle: "輸入股票代號，取得多空指標綜合評分與買入建議",
+                            icon: "chart.line.uptrend.xyaxis",
+                            iconColor: AppColor.secondary,
+                            destination: BuyAnalysisView()
                         )
 
                         toolCard(

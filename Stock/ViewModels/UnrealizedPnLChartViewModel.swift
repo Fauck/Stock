@@ -55,13 +55,6 @@ final class UnrealizedPnLChartViewModel {
     /// 是否已載入資料
     private var hasLoaded = false
 
-    private static let apiDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
-
     // MARK: - 圖表資料
 
     var chartData: [UnrealizedPnLPoint] {
@@ -72,7 +65,7 @@ final class UnrealizedPnLChartViewModel {
 
         let fees = TradingFeeSettings.load()
         let calendar = Calendar.current
-        let formatter = Self.apiDateFormatter
+        let formatter = AppDateFormatter.apiDate
 
         // 建立每日未實現損益
         var points: [UnrealizedPnLPoint] = []
@@ -168,7 +161,7 @@ final class UnrealizedPnLChartViewModel {
         let tickers = Array(Set(investments.map(\.ticker)))
         guard !tickers.isEmpty else { return }
 
-        let formatter = Self.apiDateFormatter
+        let formatter = AppDateFormatter.apiDate
         let todayStr = formatter.string(from: Date())
 
         // 計算最早買入日
@@ -176,18 +169,8 @@ final class UnrealizedPnLChartViewModel {
         let earliestStr = formatter.string(from: earliestBuyDate)
 
         // Step 1: 嘗試讀取 K 線快取
-        var cachedCandles: [String: CandleCacheData]? = nil
-        let cacheDateFmt = DateFormatter()
-        cacheDateFmt.dateFormat = "yyyyMMdd"
-        cacheDateFmt.locale = Locale(identifier: "en_US_POSIX")
-        let todayCacheStr = cacheDateFmt.string(from: Date())
-
-        if let cachedDate = UserDefaults.standard.string(forKey: CandleCacheKeys.date),
-           cachedDate == todayCacheStr,
-           let data = UserDefaults.standard.data(forKey: CandleCacheKeys.data),
-           let cached = try? JSONDecoder().decode([String: CandleCacheData].self, from: data) {
-            cachedCandles = cached
-        }
+        let todayCacheStr = CandleFetchService.todayCacheString()
+        let cachedCandles = CandleFetchService.readCandleCache(forDate: todayCacheStr)
 
         // Step 2: 判斷哪些 ticker 需要補抓（快取不夠長或無快取）
         var needFetch: [(ticker: String, symbol: String, from: String)] = []
@@ -208,53 +191,20 @@ final class UnrealizedPnLChartViewModel {
 
         // Step 3: 補抓缺少的 K 線
         if !needFetch.isEmpty {
-            struct FetchResult: Sendable {
-                let ticker: String
-                let candle: CandleCacheData
+            let specs = needFetch.map {
+                CandleFetchService.FetchSpec(ticker: $0.ticker, symbol: $0.symbol, from: $0.from)
             }
-
-            let results = await withTaskGroup(of: FetchResult?.self) { group in
-                for (ticker, symbol, fromStr) in needFetch {
-                    group.addTask {
-                        do {
-                            let response = try await StockService.shared.fetchHistoricalCandles(
-                                symbol: symbol, from: fromStr, to: todayStr
-                            )
-                            let sorted = response.data.sorted { $0.date < $1.date }
-                            return FetchResult(
-                                ticker: ticker,
-                                candle: CandleCacheData(
-                                    dates: sorted.map(\.date),
-                                    opens: sorted.map(\.open),
-                                    closes: sorted.map(\.close),
-                                    highs: sorted.map(\.high),
-                                    lows: sorted.map(\.low),
-                                    volumes: sorted.map(\.volume)
-                                )
-                            )
-                        } catch {
-                            return nil
-                        }
-                    }
-                }
-                var collected: [FetchResult] = []
-                for await result in group {
-                    if let result { collected.append(result) }
-                }
-                return collected
-            }
-
-            for result in results {
-                mergedCandles[result.ticker] = result.candle
+            let results = await CandleFetchService.fetchCandles(specs: specs, to: todayStr)
+            for (ticker, candle) in results {
+                mergedCandles[ticker] = candle
             }
         }
+
+        // 寫回快取（修復：原本只讀不寫，導致每次開啟都重新抓取）
+        CandleFetchService.writeCandleCache(mergedCandles, forDate: todayCacheStr)
 
         // Step 4: 同時抓即時報價
-        var tickerToSymbol: [String: String] = [:]
-        for ticker in tickers {
-            tickerToSymbol[ticker] = StockMapping.resolve(ticker).symbol
-        }
-        let apiSymbols = Array(Set(tickerToSymbol.values))
+        let (tickerToSymbol, apiSymbols) = CandleFetchService.mapTickersToSymbols(tickers)
         let quoteResults = await StockService.shared.fetchQuotes(symbols: apiSymbols)
 
         for (ticker, apiSymbol) in tickerToSymbol {

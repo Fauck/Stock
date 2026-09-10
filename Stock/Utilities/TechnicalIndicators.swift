@@ -465,6 +465,13 @@ enum TechnicalIndicators {
         case bearishEngulfing = "空頭吞噬"
         case morningStar = "晨星"
         case eveningStar = "夜星"
+        case threeWhiteSoldiers = "三白兵"
+        case threeBlackCrows = "三黑鴉"
+        case piercingLine = "刺穿線"
+        case darkCloudCover = "烏雲蓋頂"
+        case counterattack = "反擊線"
+        case tweezersBottom = "平頭底"
+        case tweezersTop = "平頭頂"
     }
 
     /// K 線型態方向
@@ -544,7 +551,8 @@ enum TechnicalIndicators {
         highs: [Double],
         lows: [Double],
         ma5Values: [Double?],
-        ma20Values: [Double?]
+        ma20Values: [Double?],
+        maxResults: Int = 3
     ) -> [CandlestickSignal] {
         let count = opens.count
         guard count >= 5 else { return [] }
@@ -597,6 +605,50 @@ enum TechnicalIndicators {
                     description: "大陽線→小實體→大陰線，頂部反轉訊號"
                 ))
             }
+
+            // 三白兵：連續 3 根陽線，收盤遞增，開盤在前根實體內，上影線短
+            let range1 = candleRange(highs[i - 1], lows[i - 1])
+            let range2 = candleRange(highs[i], lows[i])
+            let h1 = highs[i - 1], h2 = highs[i]
+
+            if isBullishCandle(o0, c0) && isBullishCandle(o1, c1) && isBullishCandle(o2, c2)
+                && range0 > 0 && range1 > 0 && range2 > 0
+                && body0 >= range0 * 0.5 && body1 >= range1 * 0.5 && body2 >= range2 * 0.5
+                && c1 > c0 && c2 > c1
+                && o1 >= o0 && o1 <= c0
+                && o2 >= o1 && o2 <= c1
+                && upperShadow(o0, c0, h0) <= body0 * 0.3
+                && upperShadow(o1, c1, h1) <= body1 * 0.3
+                && upperShadow(o2, c2, h2) <= body2 * 0.3
+                && isDowntrend(index: i - 2, ma5: ma5Values, ma20: ma20Values, closes: closes) {
+                signals.append(CandlestickSignal(
+                    pattern: .threeWhiteSoldiers,
+                    direction: .bullish,
+                    reliability: .high,
+                    barsAgo: barsAgo,
+                    description: "連續三根陽線收盤遞增，強烈底部反轉訊號"
+                ))
+            }
+
+            // 三黑鴉：連續 3 根陰線，收盤遞減，開盤在前根實體內，下影線短
+            if !isBullishCandle(o0, c0) && !isBullishCandle(o1, c1) && !isBullishCandle(o2, c2)
+                && range0 > 0 && range1 > 0 && range2 > 0
+                && body0 >= range0 * 0.5 && body1 >= range1 * 0.5 && body2 >= range2 * 0.5
+                && c1 < c0 && c2 < c1
+                && o1 <= o0 && o1 >= c0
+                && o2 <= o1 && o2 >= c1
+                && lowerShadow(o0, c0, l0) <= body0 * 0.3
+                && lowerShadow(o1, c1, lows[i - 1]) <= body1 * 0.3
+                && lowerShadow(o2, c2, lows[i]) <= body2 * 0.3
+                && isUptrend(index: i - 2, ma5: ma5Values, ma20: ma20Values, closes: closes) {
+                signals.append(CandlestickSignal(
+                    pattern: .threeBlackCrows,
+                    direction: .bearish,
+                    reliability: .high,
+                    barsAgo: barsAgo,
+                    description: "連續三根陰線收盤遞減，強烈頂部反轉訊號"
+                ))
+            }
         }
 
         // ── 兩根型態（吞噬）──
@@ -642,6 +694,119 @@ enum TechnicalIndicators {
                     reliability: .high,
                     barsAgo: barsAgo,
                     description: "陰線完全吞噬前一根陽線，頂部反轉訊號"
+                ))
+            }
+        }
+
+        // ── 兩根型態（刺穿線 / 烏雲蓋頂 / 反擊線 / 平頭底 / 平頭頂）──
+        for i in max(scanStart, 1)..<count {
+            let barsAgo = count - 1 - i
+            let prevO = opens[i - 1], prevC = closes[i - 1]
+            let prevH = highs[i - 1], prevL = lows[i - 1]
+            let curO = opens[i], curC = closes[i]
+            let curH = highs[i], curL = lows[i]
+
+            let prevBody = bodySize(prevO, prevC)
+            let curBody = bodySize(curO, curC)
+            let prevRange = candleRange(prevH, prevL)
+            let prevBodyMid = (max(prevO, prevC) + min(prevO, prevC)) / 2
+
+            // 刺穿線：前根大陰線 → 後根陽線跳空低開 → 收在前根實體中點以上但不超過前根開盤
+            if prevRange > 0 && prevBody >= prevRange * 0.5
+                && !isBullishCandle(prevO, prevC)
+                && isBullishCandle(curO, curC)
+                && curO < prevL                        // 跳空低開
+                && curC > prevBodyMid                   // 收在前根實體中點以上
+                && curC < prevO                         // 未超過前根開盤
+                && isDowntrend(index: i - 1, ma5: ma5Values, ma20: ma20Values, closes: closes) {
+                signals.append(CandlestickSignal(
+                    pattern: .piercingLine,
+                    direction: .bullish,
+                    reliability: .medium,
+                    barsAgo: barsAgo,
+                    description: "陰線後跳空低開收回實體一半以上，底部反轉訊號"
+                ))
+            }
+
+            // 烏雲蓋頂：前根大陽線 → 後根陰線跳空高開 → 收在前根實體中點以下但不低於前根開盤
+            if prevRange > 0 && prevBody >= prevRange * 0.5
+                && isBullishCandle(prevO, prevC)
+                && !isBullishCandle(curO, curC)
+                && curO > prevH                        // 跳空高開
+                && curC < prevBodyMid                   // 收在前根實體中點以下
+                && curC > prevO                         // 未低於前根開盤
+                && isUptrend(index: i - 1, ma5: ma5Values, ma20: ma20Values, closes: closes) {
+                signals.append(CandlestickSignal(
+                    pattern: .darkCloudCover,
+                    direction: .bearish,
+                    reliability: .medium,
+                    barsAgo: barsAgo,
+                    description: "陽線後跳空高開收跌至實體一半以下，頂部反轉訊號"
+                ))
+            }
+
+            // 反擊線（多頭）：前陰 + 後陽，兩根收盤價幾乎相同
+            let closeTolerance = max(prevC, curC) * 0.002  // 0.2% 容差
+            if !isBullishCandle(prevO, prevC) && isBullishCandle(curO, curC)
+                && prevBody > 0 && curBody > 0
+                && abs(prevC - curC) <= closeTolerance
+                && isDowntrend(index: i - 1, ma5: ma5Values, ma20: ma20Values, closes: closes) {
+                signals.append(CandlestickSignal(
+                    pattern: .counterattack,
+                    direction: .bullish,
+                    reliability: .medium,
+                    barsAgo: barsAgo,
+                    description: "陰線後陽線收在相同價位，多頭反擊訊號"
+                ))
+            }
+
+            // 反擊線（空頭）：前陽 + 後陰，兩根收盤價幾乎相同
+            if isBullishCandle(prevO, prevC) && !isBullishCandle(curO, curC)
+                && prevBody > 0 && curBody > 0
+                && abs(prevC - curC) <= closeTolerance
+                && isUptrend(index: i - 1, ma5: ma5Values, ma20: ma20Values, closes: closes) {
+                signals.append(CandlestickSignal(
+                    pattern: .counterattack,
+                    direction: .bearish,
+                    reliability: .medium,
+                    barsAgo: barsAgo,
+                    description: "陽線後陰線收在相同價位，空頭反擊訊號"
+                ))
+            }
+
+            // 平頭底：兩根最低價幾乎相同，前陰後任意，非十字星
+            let lowTolerance = max(prevL, curL) * 0.001   // 0.1% 容差
+            let prevRange2 = candleRange(prevH, prevL)
+            let curRange = candleRange(curH, curL)
+            if abs(prevL - curL) <= lowTolerance
+                && !isBullishCandle(prevO, prevC)
+                && prevRange2 > 0 && curRange > 0
+                && prevBody >= prevRange2 * 0.1           // 非十字星
+                && curBody >= curRange * 0.1              // 非十字星
+                && isDowntrend(index: i - 1, ma5: ma5Values, ma20: ma20Values, closes: closes) {
+                signals.append(CandlestickSignal(
+                    pattern: .tweezersBottom,
+                    direction: .bullish,
+                    reliability: .medium,
+                    barsAgo: barsAgo,
+                    description: "兩根K棒最低價相同，底部支撐反轉訊號"
+                ))
+            }
+
+            // 平頭頂：兩根最高價幾乎相同，前陽後任意，非十字星
+            let highTolerance = max(prevH, curH) * 0.001  // 0.1% 容差
+            if abs(prevH - curH) <= highTolerance
+                && isBullishCandle(prevO, prevC)
+                && prevRange2 > 0 && curRange > 0
+                && prevBody >= prevRange2 * 0.1           // 非十字星
+                && curBody >= curRange * 0.1              // 非十字星
+                && isUptrend(index: i - 1, ma5: ma5Values, ma20: ma20Values, closes: closes) {
+                signals.append(CandlestickSignal(
+                    pattern: .tweezersTop,
+                    direction: .bearish,
+                    reliability: .medium,
+                    barsAgo: barsAgo,
+                    description: "兩根K棒最高價相同，頂部壓力反轉訊號"
                 ))
             }
         }
@@ -723,7 +888,7 @@ enum TechnicalIndicators {
             if ra != rb { return ra < rb }
             return a.barsAgo < b.barsAgo
         }
-        return Array(sorted.prefix(3))
+        return Array(sorted.prefix(maxResults))
     }
 
     // MARK: - Signal Summary
@@ -1377,5 +1542,294 @@ enum TechnicalIndicators {
         }
 
         return SellRecommendation(score: finalScore, level: level, factors: sorted)
+    }
+
+    // MARK: - Buy Recommendation
+
+    /// 買入建議等級
+    enum BuyLevel: Sendable {
+        case strongBuy      // ≥ 70
+        case considerBuy    // 50–69
+        case neutral        // 30–49
+        case cautious       // 10–29
+        case avoidBuy       // < 10
+
+        var label: String {
+            switch self {
+            case .strongBuy:   return "強烈建議買入"
+            case .considerBuy: return "建議考慮買入"
+            case .neutral:     return "觀望"
+            case .cautious:    return "偏空謹慎"
+            case .avoidBuy:    return "暫不建議買入"
+            }
+        }
+
+        var shortLabel: String {
+            switch self {
+            case .strongBuy:   return "建議買入"
+            case .considerBuy: return "考慮買入"
+            case .neutral:     return "觀望"
+            case .cautious:    return "謹慎"
+            case .avoidBuy:    return "不宜買入"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .strongBuy:   return "checkmark.shield.fill"
+            case .considerBuy: return "hand.thumbsup"
+            case .neutral:     return "minus.circle"
+            case .cautious:    return "exclamationmark.circle.fill"
+            case .avoidBuy:    return "exclamationmark.triangle.fill"
+            }
+        }
+    }
+
+    /// 買入影響因子
+    struct BuyFactor: Sendable, Identifiable {
+        let id = UUID()
+        let name: String      // e.g. "均線金叉"
+        let points: Int       // e.g. +12 or -8
+        let isBullish: Bool   // true = 偏多（加分）, false = 偏空（扣分）
+    }
+
+    /// 買入建議結果
+    struct BuyRecommendation: Sendable {
+        let score: Int              // 0–100
+        let level: BuyLevel
+        let factors: [BuyFactor]
+    }
+
+    /// 計算綜合買入建議
+    static func computeBuyRecommendation(
+        signal: SignalSummary,
+        week52High: Double?,
+        week52Low: Double?,
+        currentPrice: Double,
+        foreignStreak: Int?,
+        trustStreak: Int?,
+        settings: BuyScoreSettings = .load()
+    ) -> BuyRecommendation {
+        var score = 50
+        var factors: [BuyFactor] = []
+
+        // ── 均線交叉 ──
+        if let maCross = signal.maCross {
+            switch maCross {
+            case .goldenCross:
+                score += settings.maGoldenCrossPoints
+                factors.append(BuyFactor(name: "均線金叉", points: settings.maGoldenCrossPoints, isBullish: true))
+            case .deathCross:
+                score += settings.maDeathCrossPoints
+                factors.append(BuyFactor(name: "均線死叉", points: settings.maDeathCrossPoints, isBullish: false))
+            }
+        }
+
+        // ── MACD 交叉 ──
+        if let macdSig = signal.macdSignal {
+            switch macdSig {
+            case .goldenCross:
+                score += settings.macdGoldenCrossPoints
+                factors.append(BuyFactor(name: "MACD金叉", points: settings.macdGoldenCrossPoints, isBullish: true))
+            case .deathCross:
+                score += settings.macdDeathCrossPoints
+                factors.append(BuyFactor(name: "MACD死叉", points: settings.macdDeathCrossPoints, isBullish: false))
+            case .none:
+                break
+            }
+        }
+
+        // ── MACD DIF 方向 ──
+        if let dif = signal.macdDIF {
+            if dif > 0 {
+                score += settings.macdPositivePoints
+                factors.append(BuyFactor(name: "DIF > 0", points: settings.macdPositivePoints, isBullish: true))
+            } else if dif < 0 {
+                score += settings.macdNegativePoints
+                factors.append(BuyFactor(name: "DIF < 0", points: settings.macdNegativePoints, isBullish: false))
+            }
+        }
+
+        // ── KDJ 交叉 ──
+        if let kdjSig = signal.kdjSignal {
+            switch kdjSig {
+            case .goldenCross:
+                score += settings.kdjGoldenCrossPoints
+                factors.append(BuyFactor(name: "KD金叉", points: settings.kdjGoldenCrossPoints, isBullish: true))
+            case .deathCross:
+                score += settings.kdjDeathCrossPoints
+                factors.append(BuyFactor(name: "KD死叉", points: settings.kdjDeathCrossPoints, isBullish: false))
+            case .none:
+                break
+            }
+        }
+
+        // ── KDJ 超買超賣 ──
+        if let k = signal.kdjK {
+            if k < 20 {
+                score += settings.kdjOversoldPoints
+                factors.append(BuyFactor(name: "KD超賣", points: settings.kdjOversoldPoints, isBullish: true))
+            } else if k > 80 {
+                score += settings.kdjOverboughtPoints
+                factors.append(BuyFactor(name: "KD超買", points: settings.kdjOverboughtPoints, isBullish: false))
+            }
+        }
+
+        // ── RSI ──
+        if let rsiSig = signal.rsiSignal {
+            switch rsiSig {
+            case .oversold:
+                score += settings.rsiOversoldPoints
+                factors.append(BuyFactor(name: "RSI超賣", points: settings.rsiOversoldPoints, isBullish: true))
+            case .overbought:
+                score += settings.rsiOverboughtPoints
+                factors.append(BuyFactor(name: "RSI超買", points: settings.rsiOverboughtPoints, isBullish: false))
+            case .neutral:
+                break
+            }
+        }
+
+        // ── 布林通道 ──
+        if let bbSig = signal.bollingerSignal {
+            switch bbSig {
+            case .nearLower:
+                score += settings.bollingerLowerPoints
+                factors.append(BuyFactor(name: "觸布林下軌", points: settings.bollingerLowerPoints, isBullish: true))
+            case .nearUpper:
+                score += settings.bollingerUpperPoints
+                factors.append(BuyFactor(name: "觸布林上軌", points: settings.bollingerUpperPoints, isBullish: false))
+            case .squeeze, .normal:
+                break
+            }
+        }
+
+        // ── 成交量 ──
+        if let volSig = signal.volumeSignal {
+            switch volSig {
+            case .surge, .high:
+                score += settings.volumeSurgePoints
+                factors.append(BuyFactor(name: "量增", points: settings.volumeSurgePoints, isBullish: true))
+            case .shrink:
+                score += settings.volumeShrinkPoints
+                factors.append(BuyFactor(name: "量縮", points: settings.volumeShrinkPoints, isBullish: false))
+            case .normal:
+                break
+            }
+        }
+
+        // ── MA 位置 ──
+        if let ma5 = signal.ma5Position {
+            if ma5 == .above {
+                score += settings.aboveMA5Points
+                factors.append(BuyFactor(name: "價格在MA5上方", points: settings.aboveMA5Points, isBullish: true))
+            } else {
+                score += settings.belowMA5Points
+                factors.append(BuyFactor(name: "價格在MA5下方", points: settings.belowMA5Points, isBullish: false))
+            }
+        }
+        if let ma20 = signal.ma20Position {
+            if ma20 == .above {
+                score += settings.aboveMA20Points
+                factors.append(BuyFactor(name: "價格在MA20上方", points: settings.aboveMA20Points, isBullish: true))
+            } else {
+                score += settings.belowMA20Points
+                factors.append(BuyFactor(name: "價格在MA20下方", points: settings.belowMA20Points, isBullish: false))
+            }
+        }
+
+        // ── 法人動態 ──
+        if let fs = foreignStreak, abs(fs) >= 3 {
+            if fs > 0 {
+                score += settings.foreignBuyStreakPoints
+                factors.append(BuyFactor(name: "外資連買\(fs)日", points: settings.foreignBuyStreakPoints, isBullish: true))
+            } else {
+                score += settings.foreignSellStreakPoints
+                factors.append(BuyFactor(name: "外資連賣\(abs(fs))日", points: settings.foreignSellStreakPoints, isBullish: false))
+            }
+        }
+        if let ts = trustStreak, abs(ts) >= 3 {
+            if ts > 0 {
+                score += settings.trustBuyStreakPoints
+                factors.append(BuyFactor(name: "投信連買\(ts)日", points: settings.trustBuyStreakPoints, isBullish: true))
+            } else {
+                score += settings.trustSellStreakPoints
+                factors.append(BuyFactor(name: "投信連賣\(abs(ts))日", points: settings.trustSellStreakPoints, isBullish: false))
+            }
+        }
+
+        // ── 背離 ──
+        for div in signal.divergences {
+            switch (div.indicator, div.type) {
+            case ("RSI", .bullish):
+                score += settings.rsiBullishDivPoints
+                factors.append(BuyFactor(name: "RSI底背離", points: settings.rsiBullishDivPoints, isBullish: true))
+            case ("MACD", .bullish):
+                score += settings.macdBullishDivPoints
+                factors.append(BuyFactor(name: "MACD底背離", points: settings.macdBullishDivPoints, isBullish: true))
+            case ("RSI", .bearish):
+                score += settings.rsiBearishDivPoints
+                factors.append(BuyFactor(name: "RSI頂背離", points: settings.rsiBearishDivPoints, isBullish: false))
+            case ("MACD", .bearish):
+                score += settings.macdBearishDivPoints
+                factors.append(BuyFactor(name: "MACD頂背離", points: settings.macdBearishDivPoints, isBullish: false))
+            default:
+                break
+            }
+        }
+
+        // ── K 線型態 ──
+        for pattern in signal.candlestickPatterns {
+            guard pattern.direction != .neutral else { continue }
+            let pts: Int
+            switch (pattern.reliability, pattern.direction) {
+            case (.high, .bullish):   pts = settings.candleHighBullishPoints
+            case (.high, .bearish):   pts = settings.candleHighBearishPoints
+            case (.medium, .bullish): pts = settings.candleMedBullishPoints
+            case (.medium, .bearish): pts = settings.candleMedBearishPoints
+            case (.low, .bullish):    pts = settings.candleLowBullishPoints
+            case (.low, .bearish):    pts = settings.candleLowBearishPoints
+            default:                  pts = 0
+            }
+            score += pts
+            factors.append(BuyFactor(
+                name: pattern.pattern.rawValue,
+                points: pts,
+                isBullish: pattern.direction == .bullish
+            ))
+        }
+
+        // ── 52 週位置 ──
+        if let low52 = week52Low, let high52 = week52High, high52 > low52, currentPrice > 0 {
+            let range52 = high52 - low52
+            let positionPct = (currentPrice - low52) / range52  // 0 = 52週低點, 1 = 52週高點
+            if positionPct <= 0.15 {
+                score += settings.near52WeekLowPoints
+                factors.append(BuyFactor(name: "接近52週低點", points: settings.near52WeekLowPoints, isBullish: true))
+            } else if positionPct >= 0.85 {
+                score += settings.near52WeekHighPoints
+                factors.append(BuyFactor(name: "接近52週高點", points: settings.near52WeekHighPoints, isBullish: false))
+            }
+        }
+
+        // Clamp
+        let finalScore = min(100, max(0, score))
+
+        // 決定等級
+        let level: BuyLevel
+        switch finalScore {
+        case 70...100: level = .strongBuy
+        case 50..<70:  level = .considerBuy
+        case 30..<50:  level = .neutral
+        case 10..<30:  level = .cautious
+        default:       level = .avoidBuy
+        }
+
+        // 排序：偏多在前，絕對值大在前
+        let sorted = factors.sorted { a, b in
+            if a.isBullish != b.isBullish { return a.isBullish }
+            return abs(a.points) > abs(b.points)
+        }
+
+        return BuyRecommendation(score: finalScore, level: level, factors: sorted)
     }
 }

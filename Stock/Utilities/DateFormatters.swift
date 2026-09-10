@@ -48,4 +48,20 @@ enum AppDateFormatter {
         f.dateFormat = "yyyyMMdd_HHmmss"
         return f
     }()
+
+    /// "yyyy-MM-dd" — API 日期格式（K 線、52 週統計）
+    static let apiDate: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    /// "yyyyMMdd" — 快取日期鍵 / TWSE 法人 API
+    static let cacheDate: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
 }

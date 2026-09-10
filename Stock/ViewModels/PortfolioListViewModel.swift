@@ -22,11 +22,6 @@ final class PortfolioListViewModel {
     /// 是否正在載入技術指標
     var isFetchingSignals: Bool = false
 
-    /// 52 週高低統計
-    struct WeekStats: Sendable {
-        let high52w: Double
-        let low52w: Double
-    }
     var weekStats: [String: WeekStats] = [:]
     var isFetchingWeekStats: Bool = false
 
@@ -187,11 +182,6 @@ final class PortfolioListViewModel {
 
     // MARK: - Journal Target (目標價 / 停損價)
 
-    struct JournalTarget {
-        let targetPrice: Double?
-        let stopLoss: Double?
-    }
-
     /// 從 journals + investments 建立每個 ticker 的目標價/停損價
     /// 同標的多筆 investment → 以最近一筆有填寫的 journal 為準
     func buildJournalTargets() {
@@ -311,7 +301,7 @@ final class PortfolioListViewModel {
     func loadData(forceRefresh: Bool = false) {
         loadDataTask?.cancel()
         loadDataTask = Task { @MainActor in
-            let todayStr = Self.todayString()
+            let todayStr = CandleFetchService.todayCacheString()
             let alreadyLoadedToday = (lastLoadDate == todayStr)
 
             // Phase 1：即時報價（永遠重抓）
@@ -384,16 +374,12 @@ final class PortfolioListViewModel {
         let tickers = groups.map(\.ticker)
         guard !tickers.isEmpty else { return }
 
-        let todayStr = Self.todayString()
+        let todayStr = CandleFetchService.todayCacheString()
         let settings = TechnicalSettings.load()
 
         // 嘗試讀取 K 線快取
         var existingCache: [String: CandleCacheData] = [:]
-        if !forceRefresh,
-           let cachedDate = UserDefaults.standard.string(forKey: Self.candleCacheDateKey),
-           cachedDate == todayStr,
-           let data = UserDefaults.standard.data(forKey: Self.candleCacheKey),
-           let cached = try? JSONDecoder().decode([String: CandleCacheData].self, from: data) {
+        if !forceRefresh, let cached = CandleFetchService.readCandleCache(forDate: todayStr) {
             existingCache = cached
         }
 
@@ -412,17 +398,13 @@ final class PortfolioListViewModel {
 
         isFetchingSignals = true
 
-        let calendar = Calendar.current
         let today = Date()
-        let defaultFromDate = calendar.date(byAdding: .day, value: -60, to: today) ?? today
-
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let defaultFromDate = Calendar.current.date(byAdding: .day, value: -60, to: today) ?? today
+        let formatter = AppDateFormatter.apiDate
         let defaultFromStr = formatter.string(from: defaultFromDate)
         let toStr = formatter.string(from: today)
 
-        var tickerSymbols: [(ticker: String, symbol: String, fromStr: String)] = []
+        var specs: [CandleFetchService.FetchSpec] = []
         for ticker in tickersToFetch {
             let symbol = StockMapping.resolve(ticker).symbol
             var fromStr = defaultFromStr
@@ -433,65 +415,21 @@ final class PortfolioListViewModel {
                     fromStr = earliestStr
                 }
             }
-            tickerSymbols.append((ticker, symbol, fromStr))
+            specs.append(CandleFetchService.FetchSpec(ticker: ticker, symbol: symbol, from: fromStr))
         }
 
-        struct CandleResult: Sendable {
-            let ticker: String
-            let dates: [String]
-            let opens: [Double]
-            let closes: [Double]
-            let highs: [Double]
-            let lows: [Double]
-            let volumes: [Int]
-        }
-
-        let results = await withTaskGroup(of: CandleResult?.self) { group in
-            for (ticker, symbol, tickerFromStr) in tickerSymbols {
-                group.addTask {
-                    do {
-                        let response = try await StockService.shared.fetchHistoricalCandles(
-                            symbol: symbol, from: tickerFromStr, to: toStr
-                        )
-                        let sorted = response.data.sorted { $0.date < $1.date }
-                        return CandleResult(
-                            ticker: ticker,
-                            dates: sorted.map(\.date),
-                            opens: sorted.map(\.open),
-                            closes: sorted.map(\.close),
-                            highs: sorted.map(\.high),
-                            lows: sorted.map(\.low),
-                            volumes: sorted.map(\.volume)
-                        )
-                    } catch {
-                        return nil
-                    }
-                }
-            }
-            var collected: [CandleResult] = []
-            for await result in group {
-                if let result { collected.append(result) }
-            }
-            return collected
-        }
+        let results = await CandleFetchService.fetchCandles(specs: specs, to: toStr)
 
         guard !Task.isCancelled else { return }
 
         // 合併快取 + 新抓取的資料
         var mergedCache = existingCache
-        for result in results {
-            mergedCache[result.ticker] = CandleCacheData(
-                dates: result.dates, opens: result.opens,
-                closes: result.closes, highs: result.highs,
-                lows: result.lows, volumes: result.volumes
-            )
+        for (ticker, candle) in results {
+            mergedCache[ticker] = candle
         }
 
         // 寫回快取
-        if let encoded = try? JSONEncoder().encode(mergedCache) {
-            UserDefaults.standard.set(encoded, forKey: Self.candleCacheKey)
-            UserDefaults.standard.set(todayStr, forKey: Self.candleCacheDateKey)
-        }
+        CandleFetchService.writeCandleCache(mergedCache, forDate: todayStr)
 
         // 從合併結果計算信號
         applySignalsFromCandles(mergedCache, tickers: tickers, settings: settings)
@@ -504,9 +442,7 @@ final class PortfolioListViewModel {
         tickers: [String],
         settings: TechnicalSettings
     ) {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let formatter = AppDateFormatter.apiDate
 
         var earliestBuyDates: [String: String] = [:]
         for group in groups {
@@ -546,7 +482,7 @@ final class PortfolioListViewModel {
         let tickers = groups.map(\.ticker)
         guard !tickers.isEmpty else { return }
 
-        let todayStr = Self.todayString()
+        let todayStr = CandleFetchService.todayCacheString()
 
         // 嘗試讀取快取
         var existingCache: [String: CodableWeekStats] = [:]
@@ -628,7 +564,7 @@ final class PortfolioListViewModel {
         let tickers = groups.map(\.ticker)
         guard !tickers.isEmpty else { return }
 
-        let todayStr = Self.todayString()
+        let todayStr = CandleFetchService.todayCacheString()
 
         // 嘗試讀取快取
         var existingCache: [String: CodableInstitutionalSummary] = [:]
@@ -662,9 +598,7 @@ final class PortfolioListViewModel {
         // 產生最近的工作日日期（排除週末），最多取 10 個工作日
         let calendar = Calendar.current
         let today = Date()
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd"
-        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let formatter = AppDateFormatter.cacheDate
 
         var datesToFetch: [String] = []
         var dayOffset = 0
@@ -755,14 +689,6 @@ final class PortfolioListViewModel {
 
         guard !Task.isCancelled else { return }
         isFetchingInstitutional = false
-    }
-
-    /// 今天日期字串（用於快取判斷）
-    private static func todayString() -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f.string(from: Date())
     }
 
     // MARK: - Actions

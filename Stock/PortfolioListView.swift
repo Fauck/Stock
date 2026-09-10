@@ -731,7 +731,7 @@ struct PortfolioListView: View {
 
     /// 展開狀態下的 52 週高低點區間
     private func weekStatsView(
-        stats: PortfolioListViewModel.WeekStats,
+        stats: WeekStats,
         currentPrice: Double?,
         avgCost: Double
     ) -> some View {
