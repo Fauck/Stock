@@ -28,8 +28,13 @@ final class KLineChartViewModel {
     var selectedCandleIndex: Int? = nil
 
     // MARK: - Indicator Toggle State
-    var showMA: Bool = true
+    var showMA5: Bool = true
+    var showMA20: Bool = true
     var showVolume: Bool = true
+
+    // MARK: - Crosshair State
+    var isDragging: Bool = false
+    var crosshairIndex: Int? = nil
 
     // MARK: - Computed Indicator Data
     var ma5: [Double?] = []

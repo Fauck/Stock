@@ -56,6 +56,7 @@ struct PortfolioListView: View {
                         displayName: vm.displayName(for: group.ticker),
                         highSinceBuy: vm.highSinceBuy[group.ticker],
                         institutionalData: vm.institutionalData[group.ticker],
+                        marginData: vm.marginData[group.ticker],
                         sellRecommendation: vm.sellRecommendation(for: group.ticker, avgCost: group.weightedAverageCost),
                         journalTarget: vm.journalTargets[group.ticker]
                     )
@@ -136,7 +137,10 @@ struct PortfolioListView: View {
     // MARK: - 總覽卡片
 
     private var totalSummaryCard: some View {
-        VStack(spacing: 12) {
+        let isLoading = vm.isFetchingPrices || vm.isFetchingSignals || vm.isFetchingWeekStats || vm.isFetchingInstitutional
+
+        return VStack(spacing: 14) {
+            // ── 標題列 ──
             HStack {
                 Image(systemName: "chart.pie")
                     .foregroundStyle(AppColor.primary)
@@ -144,11 +148,10 @@ struct PortfolioListView: View {
                     .font(.warmHeadline())
                     .foregroundStyle(AppColor.textMain)
                 Spacer()
-                // 重新整理即時價 + 技術指標 + 52週統計 + 法人
                 Button {
                     vm.loadData(forceRefresh: true)
                 } label: {
-                    if vm.isFetchingPrices || vm.isFetchingSignals || vm.isFetchingWeekStats || vm.isFetchingInstitutional {
+                    if isLoading {
                         ProgressView()
                             .scaleEffect(0.7)
                     } else {
@@ -157,70 +160,122 @@ struct PortfolioListView: View {
                             .foregroundStyle(AppColor.primary)
                     }
                 }
-                .disabled(vm.isFetchingPrices || vm.isFetchingSignals || vm.isFetchingWeekStats || vm.isFetchingInstitutional)
+                .disabled(isLoading)
             }
 
-            AppColor.divider.frame(height: 1)
-
-            HStack {
-                Text("總投資成本")
-                    .font(.warmCaption())
-                    .foregroundStyle(AppColor.textSecondary)
-                Spacer()
-                Text(String(format: "$%.0f", vm.totalCost))
-                    .font(.warmSubheadline())
-                    .foregroundStyle(AppColor.textMain)
+            // ── 三欄 Metric Grid ──
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8)
+            ], spacing: 8) {
+                dashboardMetricCell(
+                    title: "持有檔數",
+                    value: "\(vm.groups.count)",
+                    color: AppColor.primary
+                )
+                dashboardMetricCell(
+                    title: "總成本",
+                    value: String(format: "$%.0f", vm.totalCost),
+                    color: AppColor.textMain
+                )
+                if vm.hasAnyPrice {
+                    dashboardMetricCell(
+                        title: "總市值",
+                        value: String(format: "$%.0f", vm.totalMarketValue),
+                        color: AppColor.textMain
+                    )
+                } else {
+                    dashboardMetricCell(
+                        title: "總市值",
+                        value: "--",
+                        color: AppColor.textSecondary.opacity(0.5)
+                    )
+                }
             }
 
+            // ── 損益主區 ──
             if vm.hasAnyPrice {
-                HStack {
-                    Text("目前市值")
-                        .font(.warmCaption())
-                        .foregroundStyle(AppColor.textSecondary)
-                    Spacer()
-                    Text(String(format: "$%.0f", vm.totalMarketValue))
-                        .font(.warmSubheadline())
-                        .foregroundStyle(AppColor.textMain)
-                }
-                HStack {
+                VStack(spacing: 6) {
                     Text("未實現損益")
-                        .font(.warmCaption())
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
                         .foregroundStyle(AppColor.textSecondary)
-                    Spacer()
-                    HStack(spacing: 6) {
-                        Text("\(vm.totalPL >= 0 ? "+" : "")$\(vm.totalPL, specifier: "%.0f")")
-                            .font(.warmSubheadline())
-                            .fontWeight(.bold)
-                            .foregroundStyle(Color.profitLossColor(vm.totalPL))
-                        Text("(\(vm.totalReturnPct >= 0 ? "+" : "")\(vm.totalReturnPct, specifier: "%.1f")%)")
-                            .font(.warmCaption())
-                            .fontWeight(.medium)
-                            .foregroundStyle(Color.profitLossColor(vm.totalPL))
-                    }
-                }
 
-                // 本日總損益增減
-                if let dailyChange = vm.totalDailyPLChange {
-                    AppColor.divider.frame(height: 1)
-                    HStack {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chart.line.uptrend.xyaxis")
-                                .font(.warmCaption2())
-                                .foregroundStyle(AppColor.secondary)
-                            Text("本日損益增減")
-                                .font(.warmCaption())
-                                .foregroundStyle(AppColor.textSecondary)
-                        }
-                        Spacer()
-                        Text("\(dailyChange >= 0 ? "+" : "")$\(dailyChange, specifier: "%.0f")")
-                            .font(.warmSubheadline())
-                            .fontWeight(.bold)
-                            .foregroundStyle(Color.profitLossColor(dailyChange))
+                    HStack(spacing: 8) {
+                        Text("\(vm.totalPL >= 0 ? "+" : "")$\(vm.totalPL, specifier: "%.0f")")
+                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.profitLossColor(vm.totalPL))
+                            .contentTransition(.numericText())
+                        Text("(\(vm.totalReturnPct >= 0 ? "+" : "")\(vm.totalReturnPct, specifier: "%.1f")%)")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color.profitLossColor(vm.totalPL))
+                            .contentTransition(.numericText())
                     }
+
+                    // 微型報酬率進度條
+                    GeometryReader { geo in
+                        let maxWidth = geo.size.width
+                        let pct = min(1.0, abs(vm.totalReturnPct) / 50.0)
+                        let barWidth = maxWidth * pct
+                        let barColor = vm.totalPL >= 0 ? AppColor.softUp : AppColor.softDown
+
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(AppColor.divider)
+                                .frame(height: 4)
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(barColor.opacity(0.6))
+                                .frame(width: max(0, barWidth), height: 4)
+                        }
+                    }
+                    .frame(height: 4)
+                    .padding(.horizontal, 20)
+                }
+                .frame(maxWidth: .infinity)
+
+                // ── 本日增減 ──
+                if let dailyChange = vm.totalDailyPLChange {
+                    HStack(spacing: 0) {
+                        dashDivider
+                        Text("  本日增減  ")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppColor.textSecondary)
+                        dashDivider
+                    }
+                    .padding(.horizontal, 8)
+
+                    Text("\(dailyChange >= 0 ? "+" : "")$\(dailyChange, specifier: "%.0f")")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.profitLossColor(dailyChange))
+                        .contentTransition(.numericText())
                 }
             }
         }
         .cardStyle()
+    }
+
+    /// Dashboard metric 格子
+    private func dashboardMetricCell(title: String, value: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text(title)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(AppColor.textSecondary)
+            Text(value)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(AppColor.background.opacity(0.6))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// 虛線分隔線
+    private var dashDivider: some View {
+        AppColor.divider
+            .frame(height: 1)
     }
 
     // MARK: - 群組卡片
@@ -251,7 +306,7 @@ struct PortfolioListView: View {
                     }
                 } label: {
                     VStack(alignment: .leading, spacing: 7) {
-                        // Row 1：名稱 + 代號（左）｜ 現價 + 分析按鈕（右）
+                        // Row 1：名稱 + 代號（左）｜ Sparkline + 現價 + 分析按鈕（右）
                         HStack(alignment: .center, spacing: 8) {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Text(vm.displayName(for: group.ticker))
@@ -265,10 +320,17 @@ struct PortfolioListView: View {
 
                             Spacer(minLength: 8)
 
+                            // 7 日迷你走勢線
+                            if let sparkData = vm.sparklineData[group.ticker],
+                               sparkData.count >= 2 {
+                                SparklineView(data: sparkData)
+                            }
+
                             if let price = currentPrice {
                                 Text(String(format: "$%.2f", price))
                                     .font(.system(size: 19, weight: .bold, design: .rounded))
                                     .foregroundStyle(AppColor.textMain)
+                                    .contentTransition(.numericText())
                             } else {
                                 Text("--")
                                     .font(.system(size: 19, weight: .bold, design: .rounded))
@@ -306,6 +368,7 @@ struct PortfolioListView: View {
                                     Image(systemName: change >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
                                         .font(.system(size: 7))
                                     Text(String(format: "%.2f (%.2f%%)", abs(change), abs(changePct)))
+                                        .contentTransition(.numericText())
                                 }
                                 .foregroundStyle(Color.profitLossColor(change))
                             }
@@ -327,6 +390,7 @@ struct PortfolioListView: View {
                                 Text(String(format: "%@$%.0f (%@%.1f%%)", plVal >= 0 ? "+" : "", plVal, pctVal >= 0 ? "+" : "", pctVal))
                                     .font(.system(size: 13, weight: .bold, design: .rounded))
                                     .foregroundStyle(Color.profitLossColor(plVal))
+                                    .contentTransition(.numericText())
                             }
                         }
                         .lineLimit(1)
@@ -347,11 +411,13 @@ struct PortfolioListView: View {
 
                 // ── 展開的詳細內容 ──
                 if isExpanded {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 8) {
                         AppColor.divider.frame(height: 1)
                             .padding(.horizontal, 14)
 
-                        // 數據格：市值 / 成本 / 損益 / 本日增減
+                        // ━━ 持倉概覽 ━━
+                        sectionHeader("持倉概覽")
+
                         if let price = currentPrice {
                             let plVal = group.unrealizedProfitLoss(currentPrice: price, fees: fees)
                             let pctVal = group.returnPercentage(currentPrice: price, fees: fees)
@@ -386,28 +452,47 @@ struct PortfolioListView: View {
                                     Text(String(format: "%@$%.0f", dailyChange >= 0 ? "+" : "", dailyChange))
                                         .font(.system(size: 11, weight: .bold, design: .rounded))
                                         .foregroundStyle(Color.profitLossColor(dailyChange))
+                                        .contentTransition(.numericText())
                                 }
                                 .padding(.horizontal, 14)
                             }
-
-                            // 移動停利建議
-                            trailingStopBanner(ticker: group.ticker, currentPrice: price, avgCost: group.weightedAverageCost)
-                                .padding(.horizontal, 14)
                         }
 
-                        // 法人買賣超摘要
-                        if let inst = vm.institutionalData[group.ticker] {
-                            institutionalBanner(inst)
-                                .padding(.horizontal, 14)
+                        // ━━ 風控狀態 ━━
+                        if let price = currentPrice {
+                            let hasRiskData = (vm.highSinceBuy[group.ticker] ?? 0) > 0 || vm.journalTargets[group.ticker] != nil
+                            if hasRiskData {
+                                sectionHeader("風控狀態")
+                                riskControlSection(ticker: group.ticker, currentPrice: price, avgCost: group.weightedAverageCost)
+                            }
                         }
 
-                        // 關鍵信號摘要
-                        if let signal = vm.technicalSignals[group.ticker] {
-                            expandedSignalSummary(signal, ticker: group.ticker)
-                                .padding(.horizontal, 14)
+                        // ━━ 市場資訊 ━━
+                        let hasInst = vm.institutionalData[group.ticker] != nil
+                        let hasSignal = vm.technicalSignals[group.ticker] != nil
+                        let hasMargin = vm.marginData[group.ticker] != nil
+                        if hasInst || hasSignal || hasMargin {
+                            sectionHeader("市場資訊")
+
+                            if let inst = vm.institutionalData[group.ticker] {
+                                institutionalBanner(inst)
+                                    .padding(.horizontal, 14)
+                            }
+
+                            if let margin = vm.marginData[group.ticker] {
+                                marginBanner(margin)
+                                    .padding(.horizontal, 14)
+                            }
+
+                            if let signal = vm.technicalSignals[group.ticker] {
+                                expandedSignalSummary(signal, ticker: group.ticker)
+                                    .padding(.horizontal, 14)
+                            }
                         }
 
-                        // 操作列：現價輸入 + 按鈕
+                        // ━━ 操作 ━━
+                        sectionHeader("操作")
+
                         HStack(spacing: 8) {
                             // 現價手動修正
                             HStack(spacing: 6) {
@@ -457,7 +542,9 @@ struct PortfolioListView: View {
                         }
                         .padding(.horizontal, 14)
 
-                        // 買入明細
+                        // ━━ 買入明細 ━━
+                        sectionHeader("買入明細")
+
                         VStack(spacing: 6) {
                             ForEach(group.investments) { investment in
                                 detailRow(for: investment, currentPrice: currentPrice)
@@ -480,6 +567,96 @@ struct PortfolioListView: View {
         .background(AppColor.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
+
+    // MARK: - 區段標題
+
+    private func sectionHeader(_ title: String) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(AppColor.textSecondary)
+            VStack { AppColor.divider.frame(height: 0.5) }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 4)
+    }
+
+    // MARK: - 風控區段
+
+    @ViewBuilder
+    private func riskControlSection(ticker: String, currentPrice: Double, avgCost: Double) -> some View {
+        let hasTrailingStop = vm.highSinceBuy[ticker] != nil && (vm.highSinceBuy[ticker] ?? 0) > 0
+        let hasTargets = vm.journalTargets[ticker] != nil
+
+        if hasTrailingStop || hasTargets {
+            VStack(alignment: .leading, spacing: 6) {
+                // 移動停利
+                if let high = vm.highSinceBuy[ticker], high > 0 {
+                    let pct = TradingFeeSettings.load().trailingStopPct
+                    let rawStop = high * (1 - pct / 100)
+                    let stopPrice = max(rawStop, avgCost)
+                    let drawdownPct = (high - currentPrice) / high * 100
+
+                    if currentPrice <= stopPrice {
+                        trailingStopPill(
+                            icon: "exclamationmark.triangle.fill",
+                            color: AppColor.softDown,
+                            text: String(format: "已跌破停利線 $%.1f（最高 $%.1f ↓%.1f%%）", stopPrice, high, drawdownPct)
+                        )
+                    } else if currentPrice <= stopPrice * 1.03 {
+                        trailingStopPill(
+                            icon: "exclamationmark.circle.fill",
+                            color: .orange,
+                            text: String(format: "接近停利線 $%.1f（最高 $%.1f ↓%.1f%%）", stopPrice, high, drawdownPct)
+                        )
+                    } else {
+                        trailingStopPill(
+                            icon: "shield.checkered",
+                            color: AppColor.textSecondary,
+                            text: String(format: "停利參考 $%.1f（最高 $%.1f）", stopPrice, high)
+                        )
+                    }
+                }
+
+                // 目標價 / 停損價
+                if let jt = vm.journalTargets[ticker] {
+                    HStack(spacing: 12) {
+                        if let tp = jt.targetPrice, tp > 0 {
+                            let distPct = (tp - currentPrice) / currentPrice * 100
+                            HStack(spacing: 4) {
+                                Image(systemName: "target")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(AppColor.secondary)
+                                Text(String(format: "目標 $%.0f", tp))
+                                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                                    .foregroundStyle(AppColor.textMain)
+                                Text(String(format: "(%@%.1f%%)", distPct >= 0 ? "+" : "", distPct))
+                                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                                    .foregroundStyle(distPct >= 0 ? AppColor.secondary : AppColor.softDown)
+                            }
+                        }
+                        if let sl = jt.stopLoss, sl > 0 {
+                            let distPct = (currentPrice - sl) / currentPrice * 100
+                            HStack(spacing: 4) {
+                                Image(systemName: "exclamationmark.shield")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(AppColor.softDown)
+                                Text(String(format: "停損 $%.0f", sl))
+                                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                                    .foregroundStyle(AppColor.textMain)
+                                Text(String(format: "(-%@%.1f%%)", distPct >= 0 ? "" : "+", abs(distPct)))
+                                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                                    .foregroundStyle(distPct > 5 ? AppColor.textSecondary : AppColor.softDown)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 4)
+                }
+            }
+            .padding(.horizontal, 14)
+        }
     }
 
     /// 展開區塊的數據格子
@@ -882,42 +1059,64 @@ struct PortfolioListView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - 移動停利建議橫幅
+    // MARK: - 融資融券摘要
 
-    @ViewBuilder
-    private func trailingStopBanner(ticker: String, currentPrice: Double, avgCost: Double) -> some View {
-        if let high = vm.highSinceBuy[ticker], high > 0 {
-            let pct = TradingFeeSettings.load().trailingStopPct
-            let rawStop = high * (1 - pct / 100)
-            // 停利線不低於買入均價（保本下限）
-            let stopPrice = max(rawStop, avgCost)
-            let drawdownPct = (high - currentPrice) / high * 100
-
-            AppColor.divider.frame(height: 1)
-
-            if currentPrice <= stopPrice {
-                // 已跌破停利線
-                trailingStopPill(
-                    icon: "exclamationmark.triangle.fill",
-                    color: AppColor.softDown,
-                    text: String(format: "已跌破停利線 $%.1f（最高 $%.1f ↓%.1f%%）", stopPrice, high, drawdownPct)
-                )
-            } else if currentPrice <= stopPrice * 1.03 {
-                // 接近停利線（3% 以內）
-                trailingStopPill(
-                    icon: "exclamationmark.circle.fill",
-                    color: .orange,
-                    text: String(format: "接近停利線 $%.1f（最高 $%.1f ↓%.1f%%）", stopPrice, high, drawdownPct)
-                )
-            } else {
-                // 安全持有
-                trailingStopPill(
-                    icon: "shield.checkered",
-                    color: AppColor.textSecondary,
-                    text: String(format: "停利參考 $%.1f（最高 $%.1f）", stopPrice, high)
-                )
+    private func marginBanner(_ data: StockService.MarginTradingSummary) -> some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: "banknote")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text(String(format: "融資融券（%@）", {
+                    guard let d = data.days.first?.date, d.count == 8 else { return "" }
+                    let mm = d[d.index(d.startIndex, offsetBy: 4)..<d.index(d.startIndex, offsetBy: 6)]
+                    let dd = d[d.index(d.startIndex, offsetBy: 6)..<d.endIndex]
+                    return "\(mm)/\(dd)"
+                }()))
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+                if vm.isFetchingMargin {
+                    ProgressView().scaleEffect(0.5)
+                }
+            }
+            HStack(spacing: 0) {
+                marginBannerCell(label: "融資餘額", value: data.latestMarginBalance, isBalance: true)
+                marginBannerCell(label: "融資增減", value: data.days.first?.marginBuyChange ?? 0, isBalance: false)
+                marginBannerCell(label: "融券餘額", value: data.latestShortBalance, isBalance: true)
+                marginBannerCell(label: "融券增減", value: data.days.first?.shortSellChange ?? 0, isBalance: false)
             }
         }
+        .padding(10)
+        .background(AppColor.background.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func marginBannerCell(label: String, value: Int, isBalance: Bool) -> some View {
+        VStack(spacing: 2) {
+            Text(label)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(AppColor.textSecondary)
+            if isBalance {
+                Text(formatCompactBanner(value))
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(AppColor.textMain)
+            } else {
+                Text("\(value >= 0 ? "+" : "")\(value)")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.profitLossColor(Double(value)))
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func formatCompactBanner(_ value: Int) -> String {
+        if abs(value) >= 10000 {
+            return String(format: "%.1f萬", Double(value) / 10000.0)
+        }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
     private func trailingStopPill(icon: String, color: Color, text: String) -> some View {
@@ -993,6 +1192,41 @@ private struct FlowLayout: Layout {
             lineHeight = max(lineHeight, size.height)
             currentX += size.width + spacing
         }
+    }
+}
+
+// MARK: - Sparkline View
+
+/// 微型走勢線（7 日收盤價折線圖）
+private struct SparklineView: View {
+    let data: [Double]
+
+    var body: some View {
+        Canvas { context, size in
+            guard data.count >= 2 else { return }
+            let minVal = data.min() ?? 0
+            let maxVal = data.max() ?? 1
+            let range = maxVal - minVal
+            guard range > 0 else { return }
+
+            let stepX = size.width / CGFloat(data.count - 1)
+
+            var path = Path()
+            for (i, value) in data.enumerated() {
+                let x = stepX * CGFloat(i)
+                let y = size.height - (CGFloat((value - minVal) / range) * size.height)
+                if i == 0 {
+                    path.move(to: CGPoint(x: x, y: y))
+                } else {
+                    path.addLine(to: CGPoint(x: x, y: y))
+                }
+            }
+
+            let isUp = (data.last ?? 0) >= (data.first ?? 0)
+            let color = isUp ? AppColor.softUp : AppColor.softDown
+            context.stroke(path, with: .color(color), lineWidth: 1.2)
+        }
+        .frame(width: 40, height: 20)
     }
 }
 

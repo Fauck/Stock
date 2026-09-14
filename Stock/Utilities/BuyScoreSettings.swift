@@ -47,17 +47,41 @@ struct BuyScoreSettings: Codable, Equatable, Sendable {
     var macdBullishDivPoints: Int = 10
     var macdBearishDivPoints: Int = -8
 
-    // MARK: - K 線型態
-    var candleHighBullishPoints: Int = 10
-    var candleHighBearishPoints: Int = -8
-    var candleMedBullishPoints: Int = 6
-    var candleMedBearishPoints: Int = -5
-    var candleLowBullishPoints: Int = 3
-    var candleLowBearishPoints: Int = -2
+    // MARK: - K 線型態（僅供參考，權重已下調）
+    var candleHighBullishPoints: Int = 5
+    var candleHighBearishPoints: Int = -4
+    var candleMedBullishPoints: Int = 3
+    var candleMedBearishPoints: Int = -2
+    var candleLowBullishPoints: Int = 1
+    var candleLowBearishPoints: Int = -1
 
     // MARK: - 52 週位置
     var near52WeekLowPoints: Int = 8
     var near52WeekHighPoints: Int = -6
+
+    // MARK: - 市場狀態修正
+    var sidewaysDiscountPct: Int = 50  // 盤整時超買超賣信號打折 %
+
+    // MARK: - 法人累計
+    var foreignCumulativeLargeThreshold: Int = 5000
+    var foreignCumulativeLargePoints: Int = 5
+    var foreignCumulativeSmallThreshold: Int = 1000
+    var foreignCumulativeSmallPoints: Int = 3
+    var trustCumulativeLargeThreshold: Int = 2000
+    var trustCumulativeLargePoints: Int = 4
+    var trustCumulativeSmallThreshold: Int = 500
+    var trustCumulativeSmallPoints: Int = 2
+
+    // MARK: - 融資融券
+    var marginIncreasePoints: Int = -3    // 融資大增 → 偏空（散戶追多）
+    var marginDecreasePoints: Int = 3     // 融資大減 → 偏多（賣壓減少）
+    var shortIncreasePoints: Int = 3      // 融券大增 → 偏多（軋空潛力）
+    var shortDecreasePoints: Int = -2     // 融券大減 → 偏空（回補完畢）
+    var marginChangeThreshold: Int = 500  // 增減超過此張數才計分
+
+    // MARK: - 信號分組上限（去相關化）
+    var trendGroupCap: Int = 15       // 趨勢組 (MA cross + MACD cross + DIF) ±上限
+    var momentumGroupCap: Int = 12    // 動量組 (KDJ + RSI) ±上限
 
     // MARK: - Persistence
 

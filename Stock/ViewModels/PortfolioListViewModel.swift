@@ -28,9 +28,16 @@ final class PortfolioListViewModel {
     /// 買入後最高價 [ticker: highestPrice]（用於移動停利）
     var highSinceBuy: [String: Double] = [:]
 
+    /// 最近 7 個交易日收盤價 [ticker: [Double]]（Sparkline 用）
+    var sparklineData: [String: [Double]] = [:]
+
     /// 三大法人買賣超 [ticker: InstitutionalSummary]
     var institutionalData: [String: StockService.InstitutionalSummary] = [:]
     var isFetchingInstitutional: Bool = false
+
+    /// 融資融券 [ticker: MarginTradingSummary]
+    var marginData: [String: StockService.MarginTradingSummary] = [:]
+    var isFetchingMargin: Bool = false
 
     /// 目標價 / 停損價（從交易日誌取得）[ticker: JournalTarget]
     var journalTargets: [String: JournalTarget] = [:]
@@ -68,6 +75,8 @@ final class PortfolioListViewModel {
     private static let weekStatsCacheDateKey = "weekStatsCacheDate"
     private static let institutionalCacheKey = "institutionalCache"
     private static let institutionalCacheDateKey = "institutionalCacheDate"
+    private static let marginCacheKey = "marginCache"
+    private static let marginCacheDateKey = "marginCacheDate"
     private static let candleCacheKey = CandleCacheKeys.data
     private static let candleCacheDateKey = CandleCacheKeys.date
 
@@ -170,13 +179,19 @@ final class PortfolioListViewModel {
 
         // 法人連續天數
         let inst = institutionalData[ticker]
+        let margin = marginData[ticker]
 
         return TechnicalIndicators.computeSellRecommendation(
             signal: signal,
             trailingStopTriggered: trailingStopTriggered,
             nearTrailingStop: nearTrailingStop,
             foreignStreak: inst?.foreignStreak,
-            trustStreak: inst?.trustStreak
+            trustStreak: inst?.trustStreak,
+            foreignCumulativeNet: inst?.foreignCumulativeNet,
+            trustCumulativeNet: inst?.trustCumulativeNet,
+            marginTotalChange: margin?.marginBuyTotalChange,
+            shortTotalChange: margin?.shortSellTotalChange,
+            regime: signal.regime
         )
     }
 
@@ -323,7 +338,8 @@ final class PortfolioListViewModel {
             async let signalsTask: () = fetchTechnicalSignalsIfNeeded(forceRefresh: needRefreshCache)
             async let weekTask: () = fetchWeekStatsIfNeeded(forceRefresh: needRefreshCache)
             async let instTask: () = fetchInstitutionalIfNeeded(forceRefresh: needRefreshCache)
-            _ = await (signalsTask, weekTask, instTask)
+            async let marginTask: () = fetchMarginIfNeeded(forceRefresh: needRefreshCache)
+            _ = await (signalsTask, weekTask, instTask, marginTask)
 
             lastLoadDate = todayStr
         }
@@ -474,6 +490,10 @@ final class PortfolioListViewModel {
                     highSinceBuy[ticker] = maxHigh
                 }
             }
+
+            // Sparkline：取最近 7 個交易日收盤價
+            let closes = candle.closes
+            sparklineData[ticker] = Array(closes.suffix(7))
         }
     }
 
@@ -691,6 +711,133 @@ final class PortfolioListViewModel {
         isFetchingInstitutional = false
     }
 
+    /// 融資融券（帶當日快取 + 排除週末，新 ticker 自動補抓）
+    private func fetchMarginIfNeeded(forceRefresh: Bool) async {
+        let tickers = groups.map(\.ticker)
+        guard !tickers.isEmpty else { return }
+
+        let todayStr = CandleFetchService.todayCacheString()
+
+        // 嘗試讀取快取
+        var existingCache: [String: CodableMarginSummary] = [:]
+        if !forceRefresh,
+           let cachedDate = UserDefaults.standard.string(forKey: Self.marginCacheDateKey),
+           cachedDate == todayStr,
+           let data = UserDefaults.standard.data(forKey: Self.marginCacheKey),
+           let cached = try? JSONDecoder().decode([String: CodableMarginSummary].self, from: data) {
+            existingCache = cached
+            for (ticker, summary) in cached {
+                marginData[ticker] = summary.toSummary()
+            }
+        }
+
+        // 找出快取中缺少的 ticker
+        let missingTickers = tickers.filter { existingCache[$0] == nil }
+
+        if missingTickers.isEmpty && !existingCache.isEmpty {
+            return
+        }
+
+        isFetchingMargin = true
+
+        var tickerToCode: [String: String] = [:]
+        for ticker in tickers {
+            let resolved = StockMapping.resolve(ticker)
+            tickerToCode[ticker] = resolved.symbol
+        }
+
+        // 產生最近的工作日日期（排除週末），最多取 10 個工作日
+        let calendar = Calendar.current
+        let today = Date()
+        let formatter = AppDateFormatter.cacheDate
+
+        var datesToFetch: [String] = []
+        var dayOffset = 0
+        while datesToFetch.count < 10 && dayOffset < 20 {
+            if let d = calendar.date(byAdding: .day, value: -dayOffset, to: today) {
+                let weekday = calendar.component(.weekday, from: d)
+                if weekday != 1 && weekday != 7 {
+                    datesToFetch.append(formatter.string(from: d))
+                }
+            }
+            dayOffset += 1
+        }
+
+        // 同時抓取 TWSE + TPEx 融資融券資料，再合併
+        let allDayResults = await withTaskGroup(
+            of: (String, [String: StockService.MarginTradingDayData]?).self
+        ) { group in
+            for dateStr in datesToFetch {
+                group.addTask {
+                    do {
+                        let data = try await StockService.shared.fetchMarginTradingData(date: dateStr)
+                        return ("TWSE_\(dateStr)", data)
+                    } catch {
+                        return ("TWSE_\(dateStr)", nil)
+                    }
+                }
+                group.addTask {
+                    do {
+                        let data = try await StockService.shared.fetchTPExMarginTradingData(date: dateStr)
+                        return ("TPEx_\(dateStr)", data)
+                    } catch {
+                        return ("TPEx_\(dateStr)", nil)
+                    }
+                }
+            }
+            var twseMap: [String: [String: StockService.MarginTradingDayData]] = [:]
+            var tpexMap: [String: [String: StockService.MarginTradingDayData]] = [:]
+            for await (key, data) in group {
+                guard let data else { continue }
+                if key.hasPrefix("TWSE_") {
+                    let dateStr = String(key.dropFirst(5))
+                    twseMap[dateStr] = data
+                } else if key.hasPrefix("TPEx_") {
+                    let dateStr = String(key.dropFirst(5))
+                    tpexMap[dateStr] = data
+                }
+            }
+            var merged: [(String, [String: StockService.MarginTradingDayData])] = []
+            let allDates = Set(twseMap.keys).union(tpexMap.keys)
+            for dateStr in allDates {
+                var dayData = twseMap[dateStr] ?? [:]
+                if let tpexData = tpexMap[dateStr] {
+                    dayData.merge(tpexData) { existing, _ in existing }
+                }
+                merged.append((dateStr, dayData))
+            }
+            return merged.sorted { $0.0 > $1.0 }
+        }
+
+        guard !Task.isCancelled else { return }
+
+        let tradingDays = Array(allDayResults.prefix(5))
+
+        var mergedCache = existingCache
+        for (ticker, code) in tickerToCode {
+            var days: [StockService.MarginTradingDayData] = []
+            for (_, dayMap) in tradingDays {
+                if let dayData = dayMap[code] {
+                    days.append(dayData)
+                }
+            }
+            if !days.isEmpty {
+                let summary = StockService.MarginTradingSummary(days: days)
+                marginData[ticker] = summary
+                mergedCache[ticker] = CodableMarginSummary(from: summary)
+            }
+        }
+
+        // 寫回快取
+        if let encoded = try? JSONEncoder().encode(mergedCache) {
+            UserDefaults.standard.set(encoded, forKey: Self.marginCacheKey)
+            UserDefaults.standard.set(todayStr, forKey: Self.marginCacheDateKey)
+        }
+
+        guard !Task.isCancelled else { return }
+        isFetchingMargin = false
+    }
+
     // MARK: - Actions
 
     func selectForSell(_ investment: Investment) {
@@ -766,6 +913,37 @@ private struct CodableInstitutionalSummary: Codable {
                                                totalNet: $0.totalNet)
         }
         return StockService.InstitutionalSummary(days: converted)
+    }
+}
+
+/// 融資融券快取用
+private struct CodableMarginSummary: Codable {
+    let days: [CodableDayData]
+
+    struct CodableDayData: Codable {
+        let date: String
+        let marginBuyBalance: Int
+        let marginBuyChange: Int
+        let shortSellBalance: Int
+        let shortSellChange: Int
+        let dayTradeOffset: Int
+    }
+
+    init(from summary: StockService.MarginTradingSummary) {
+        self.days = summary.days.map {
+            CodableDayData(date: $0.date, marginBuyBalance: $0.marginBuyBalance,
+                           marginBuyChange: $0.marginBuyChange, shortSellBalance: $0.shortSellBalance,
+                           shortSellChange: $0.shortSellChange, dayTradeOffset: $0.dayTradeOffset)
+        }
+    }
+
+    func toSummary() -> StockService.MarginTradingSummary {
+        let converted = days.map {
+            StockService.MarginTradingDayData(date: $0.date, marginBuyBalance: $0.marginBuyBalance,
+                                               marginBuyChange: $0.marginBuyChange, shortSellBalance: $0.shortSellBalance,
+                                               shortSellChange: $0.shortSellChange, dayTradeOffset: $0.dayTradeOffset)
+        }
+        return StockService.MarginTradingSummary(days: converted)
     }
 }
 

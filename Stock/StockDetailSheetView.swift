@@ -16,6 +16,7 @@ struct StockDetailSheetView: View {
     let displayName: String
     let highSinceBuy: Double?
     let institutionalData: StockService.InstitutionalSummary?
+    let marginData: StockService.MarginTradingSummary?
     let sellRecommendation: TechnicalIndicators.SellRecommendation?
     let journalTarget: JournalTarget?
 
@@ -51,6 +52,7 @@ struct StockDetailSheetView: View {
         displayName: String,
         highSinceBuy: Double? = nil,
         institutionalData: StockService.InstitutionalSummary? = nil,
+        marginData: StockService.MarginTradingSummary? = nil,
         sellRecommendation: TechnicalIndicators.SellRecommendation? = nil,
         journalTarget: JournalTarget? = nil
     ) {
@@ -61,6 +63,7 @@ struct StockDetailSheetView: View {
         self.displayName = displayName
         self.highSinceBuy = highSinceBuy
         self.institutionalData = institutionalData
+        self.marginData = marginData
         self.sellRecommendation = sellRecommendation
         self.journalTarget = journalTarget
         self._chartVM = State(initialValue: KLineChartViewModel(group: group))
@@ -84,11 +87,6 @@ struct StockDetailSheetView: View {
                         // 背離信號
                         if let signal, !signal.divergences.isEmpty {
                             divergenceSection(signal.divergences)
-                        }
-
-                        // K 線型態
-                        if let signal, !signal.candlestickPatterns.isEmpty {
-                            candlestickPatternSection(signal.candlestickPatterns)
                         }
 
                         // 賣出建議
@@ -128,6 +126,16 @@ struct StockDetailSheetView: View {
                         // 法人買賣超
                         if let inst = institutionalData {
                             institutionalSection(inst)
+                        }
+
+                        // 融資融券
+                        if let margin = marginData {
+                            marginTradingSection(margin)
+                        }
+
+                        // K 線型態（僅供參考）
+                        if let signal, !signal.candlestickPatterns.isEmpty {
+                            candlestickPatternSection(signal.candlestickPatterns)
                         }
 
                         // 52 週區間
@@ -474,7 +482,7 @@ struct StockDetailSheetView: View {
                 Image(systemName: "chart.bar.doc.horizontal")
                     .font(.warmCaption2())
                     .foregroundStyle(AppColor.primary)
-                Text("K 線型態")
+                Text("K 線型態（僅供參考）")
                     .font(.warmCaption())
                     .foregroundStyle(AppColor.textSecondary)
             }
@@ -1188,6 +1196,16 @@ struct StockDetailSheetView: View {
                 Spacer()
             }
 
+            // 累計淨買超摘要
+            if data.days.count > 1 {
+                HStack(spacing: 8) {
+                    cumulativeLabel("外資", value: data.foreignCumulativeNet)
+                    cumulativeLabel("投信", value: data.trustCumulativeNet)
+                    cumulativeLabel("合計", value: data.totalCumulativeNet)
+                    Spacer()
+                }
+            }
+
             // 最近 N 日表格
             VStack(spacing: 0) {
                 // 表頭
@@ -1263,6 +1281,22 @@ struct StockDetailSheetView: View {
         }
     }
 
+    /// 法人累計淨買超標籤
+    private func cumulativeLabel(_ label: String, value: Int) -> some View {
+        HStack(spacing: 2) {
+            Text(label)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(AppColor.textSecondary)
+            Text("\(value > 0 ? "+" : "")\(value)")
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.profitLossColor(Double(value)))
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(AppColor.cardBackground)
+        .clipShape(Capsule())
+    }
+
     private func netText(_ value: Int) -> Text {
         Text("\(value >= 0 ? "+" : "")\(value)")
             .foregroundColor(Color.profitLossColor(Double(value)))
@@ -1274,6 +1308,170 @@ struct StockDetailSheetView: View {
         let mm = dateStr[dateStr.index(dateStr.startIndex, offsetBy: 4)..<dateStr.index(dateStr.startIndex, offsetBy: 6)]
         let dd = dateStr[dateStr.index(dateStr.startIndex, offsetBy: 6)..<dateStr.endIndex]
         return "\(mm)/\(dd)"
+    }
+
+    // MARK: - 融資融券卡片
+
+    private func marginTradingSection(_ data: StockService.MarginTradingSummary) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // 標題
+            HStack(spacing: 4) {
+                Image(systemName: "banknote")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("融資融券")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            // 餘額摘要
+            HStack(spacing: 12) {
+                marginBalanceLabel("融資餘額", value: data.latestMarginBalance)
+                marginBalanceLabel("融券餘額", value: data.latestShortBalance)
+                if data.latestMarginBalance > 0 {
+                    let ratio = Double(data.latestShortBalance) / Double(data.latestMarginBalance) * 100
+                    marginBalanceLabel("券資比", text: String(format: "%.1f%%", ratio))
+                }
+                Spacer()
+            }
+
+            // 連續增減趨勢
+            HStack(spacing: 12) {
+                marginStreakBadge(label: "融資", streak: data.marginStreak)
+                marginStreakBadge(label: "融券", streak: data.shortStreak)
+                Spacer()
+            }
+
+            // 累計增減
+            if data.days.count > 1 {
+                HStack(spacing: 8) {
+                    cumulativeLabel("融資增減", value: data.marginBuyTotalChange)
+                    cumulativeLabel("融券增減", value: data.shortSellTotalChange)
+                    Spacer()
+                }
+            }
+
+            // 最近 N 日表格
+            VStack(spacing: 0) {
+                // 表頭
+                HStack(spacing: 0) {
+                    Text("日期")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("融資餘額")
+                        .frame(maxWidth: .infinity)
+                    Text("融資增減")
+                        .frame(maxWidth: .infinity)
+                    Text("融券餘額")
+                        .frame(maxWidth: .infinity)
+                    Text("融券增減")
+                        .frame(maxWidth: .infinity)
+                    Text("互抵")
+                        .frame(width: 40)
+                }
+                .font(.system(size: 8, weight: .medium, design: .rounded))
+                .foregroundStyle(AppColor.textSecondary)
+                .padding(.bottom, 4)
+
+                Divider()
+
+                ForEach(data.days, id: \.date) { day in
+                    HStack(spacing: 0) {
+                        Text(formatShortDate(day.date))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(formatCompact(day.marginBuyBalance))
+                            .frame(maxWidth: .infinity)
+                        marginChangeText(day.marginBuyChange)
+                            .frame(maxWidth: .infinity)
+                        Text(formatCompact(day.shortSellBalance))
+                            .frame(maxWidth: .infinity)
+                        marginChangeText(day.shortSellChange)
+                            .frame(maxWidth: .infinity)
+                        Text("\(day.dayTradeOffset)")
+                            .frame(width: 40)
+                    }
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(AppColor.textMain)
+                    .padding(.vertical, 3)
+                }
+            }
+        }
+        .padding(12)
+        .background(AppColor.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
+
+    /// 融資融券餘額標籤
+    private func marginBalanceLabel(_ label: String, value: Int) -> some View {
+        HStack(spacing: 2) {
+            Text(label)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(AppColor.textSecondary)
+            Text(formatCompact(value))
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(AppColor.textMain)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(AppColor.cardBackground)
+        .clipShape(Capsule())
+    }
+
+    /// 融資融券餘額標籤（文字版）
+    private func marginBalanceLabel(_ label: String, text: String) -> some View {
+        HStack(spacing: 2) {
+            Text(label)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(AppColor.textSecondary)
+            Text(text)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(AppColor.primary)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(AppColor.cardBackground)
+        .clipShape(Capsule())
+    }
+
+    /// 融資融券連續增減 badge
+    private func marginStreakBadge(label: String, streak: Int) -> some View {
+        Group {
+            if abs(streak) >= 2 {
+                let isIncrease = streak > 0
+                let text = isIncrease ? "\(label)連增\(streak)日" : "\(label)連減\(abs(streak))日"
+                // 融資增=散戶追多(偏空)，融資減=賣壓釋放(偏多)
+                // 融券增=軋空潛力(偏多)，融券減=回補完畢(偏空)
+                let isBullish = (label == "融資" && !isIncrease) || (label == "融券" && isIncrease)
+                let color: Color = isBullish ? AppColor.softUp : AppColor.softDown
+                Text(text)
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(color.opacity(0.12))
+                    .clipShape(Capsule())
+            } else {
+                Text("—")
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppColor.textSecondary.opacity(0.5))
+            }
+        }
+    }
+
+    /// 融資融券增減文字（帶正負號與顏色）
+    private func marginChangeText(_ value: Int) -> Text {
+        Text("\(value >= 0 ? "+" : "")\(value)")
+            .foregroundColor(Color.profitLossColor(Double(value)))
+    }
+
+    /// 數字格式化（大數字簡寫）
+    private func formatCompact(_ value: Int) -> String {
+        if abs(value) >= 10000 {
+            return String(format: "%.1f萬", Double(value) / 10000.0)
+        }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
     // MARK: - 52 週區間

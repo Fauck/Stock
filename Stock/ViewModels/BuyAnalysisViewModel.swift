@@ -141,7 +141,8 @@ final class BuyAnalysisViewModel {
                 volumeSignal: signal.volumeSignal,
                 volumeRatio: signal.volumeRatio,
                 divergences: signal.divergences,
-                candlestickPatterns: patterns  // 使用完整型態列表
+                candlestickPatterns: patterns,  // 使用完整型態列表
+                regime: signal.regime
             )
 
             recommendation = TechnicalIndicators.computeBuyRecommendation(
@@ -150,7 +151,10 @@ final class BuyAnalysisViewModel {
                 week52Low: week52Low,
                 currentPrice: currentPrice,
                 foreignStreak: instSummary?.foreignStreak,
-                trustStreak: instSummary?.trustStreak
+                trustStreak: instSummary?.trustStreak,
+                foreignCumulativeNet: instSummary?.foreignCumulativeNet,
+                trustCumulativeNet: instSummary?.trustCumulativeNet,
+                regime: signal.regime
             )
 
             hasResult = true

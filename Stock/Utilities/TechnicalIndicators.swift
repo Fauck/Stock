@@ -935,6 +935,44 @@ enum TechnicalIndicators {
         let divergences: [DivergenceSignal]
         /// K 線型態信號
         let candlestickPatterns: [CandlestickSignal]
+        /// 市場狀態（多頭/空頭/盤整）
+        let regime: MarketRegime
+    }
+
+    // MARK: - 市場狀態
+
+    /// 市場狀態分類（基於 MA20 斜率與價格位置）
+    enum MarketRegime: String, Sendable {
+        case bullish  = "多頭"   // MA20 向上 + 收盤 > MA20
+        case bearish  = "空頭"   // MA20 向下 + 收盤 < MA20
+        case sideways = "盤整"   // 其餘
+
+        var label: String { rawValue }
+    }
+
+    /// 根據 MA20 斜率與收盤價位置判斷市場狀態
+    static func detectRegime(closes: [Double], ma20Values: [Double?]) -> MarketRegime {
+        // 需要至少 5 個有效 MA20 值
+        let validMA = ma20Values.compactMap { $0 }
+        guard validMA.count >= 5, let lastClose = closes.last else {
+            return .sideways
+        }
+
+        let recent5 = Array(validMA.suffix(5))
+        let firstMA = recent5[0]
+        let lastMA = recent5[4]
+
+        guard firstMA > 0 else { return .sideways }
+
+        let slopePct = (lastMA - firstMA) / firstMA * 100  // 百分比
+
+        if slopePct > 0.5 && lastClose > lastMA {
+            return .bullish
+        } else if slopePct < -0.5 && lastClose < lastMA {
+            return .bearish
+        } else {
+            return .sideways
+        }
     }
 
     /// 均線相對位置
@@ -1053,7 +1091,8 @@ enum TechnicalIndicators {
                 recentHigh20: nil, recentLow20: nil,
                 volumeSignal: nil, volumeRatio: nil,
                 divergences: [],
-                candlestickPatterns: []
+                candlestickPatterns: [],
+                regime: .sideways
             )
         }
 
@@ -1256,6 +1295,9 @@ enum TechnicalIndicators {
             candlestickPatterns = []
         }
 
+        // ── 市場狀態偵測 ──
+        let regime = detectRegime(closes: closes, ma20Values: maLongValues)
+
         return SignalSummary(
             ma5Position: ma5Pos,
             ma20Position: ma20Pos,
@@ -1279,7 +1321,8 @@ enum TechnicalIndicators {
             volumeSignal: volSig == .normal ? nil : volSig,
             volumeRatio: volRatio,
             divergences: divergences,
-            candlestickPatterns: candlestickPatterns
+            candlestickPatterns: candlestickPatterns,
+            regime: regime
         )
     }
 
@@ -1345,167 +1388,243 @@ enum TechnicalIndicators {
         trailingStopTriggered: Bool,
         nearTrailingStop: Bool,
         foreignStreak: Int?,
-        trustStreak: Int?
+        trustStreak: Int?,
+        foreignCumulativeNet: Int? = nil,
+        trustCumulativeNet: Int? = nil,
+        marginTotalChange: Int? = nil,
+        shortTotalChange: Int? = nil,
+        regime: MarketRegime = .sideways,
+        settings: BuyScoreSettings = .load()
     ) -> SellRecommendation {
-        var score = 50
         var factors: [SellFactor] = []
 
-        // ── 均線交叉 ──
+        // ── 分組小計 ──
+        var trendGroup = 0       // 趨勢組：MA cross, MACD cross
+        var momentumGroup = 0    // 動量組：KDJ, RSI
+        var volatilityGroup = 0  // 波動組：布林, 成交量
+        var flowGroup = 0        // 籌碼組：法人
+        var structureGroup = 0   // 結構組：背離, K 線型態
+        var positionGroup = 0    // 位置組：MA5/MA20 位置
+        var trailingGroup = 0    // 停利組：移動停利
+
+        // ── 趨勢組：均線交叉 ──
         if let maCross = signal.maCross {
             switch maCross {
             case .deathCross:
-                score += 15
+                trendGroup += 15
                 factors.append(SellFactor(name: "均線死叉", points: 15, isBearish: true))
             case .goldenCross:
-                score -= 10
+                trendGroup -= 10
                 factors.append(SellFactor(name: "均線金叉", points: -10, isBearish: false))
             }
         }
 
-        // ── MACD 交叉 ──
+        // ── 趨勢組：MACD 交叉 ──
         if let macdSig = signal.macdSignal {
             switch macdSig {
             case .deathCross:
-                score += 12
+                trendGroup += 12
                 factors.append(SellFactor(name: "MACD死叉", points: 12, isBearish: true))
             case .goldenCross:
-                score -= 8
+                trendGroup -= 8
                 factors.append(SellFactor(name: "MACD金叉", points: -8, isBearish: false))
             case .none:
                 break
             }
         }
 
-        // ── KDJ 交叉 ──
+        // ── 動量組：KDJ 交叉 ──
         if let kdjSig = signal.kdjSignal {
             switch kdjSig {
             case .deathCross:
-                score += 10
+                momentumGroup += 10
                 factors.append(SellFactor(name: "KD死叉", points: 10, isBearish: true))
             case .goldenCross:
-                score -= 6
+                momentumGroup -= 6
                 factors.append(SellFactor(name: "KD金叉", points: -6, isBearish: false))
             case .none:
                 break
             }
         }
 
-        // ── RSI ──
+        // ── 動量組：RSI（盤整時打折）──
         if let rsiSig = signal.rsiSignal {
+            let discount = regime == .sideways ? Double(settings.sidewaysDiscountPct) / 100.0 : 1.0
             switch rsiSig {
             case .overbought:
-                score += 12
-                factors.append(SellFactor(name: "RSI超買", points: 12, isBearish: true))
+                let pts = Int(12.0 * discount)
+                momentumGroup += pts
+                factors.append(SellFactor(name: "RSI超買", points: pts, isBearish: true))
             case .oversold:
-                score -= 8
-                factors.append(SellFactor(name: "RSI超賣", points: -8, isBearish: false))
+                let pts = Int(-8.0 * discount)
+                momentumGroup += pts
+                factors.append(SellFactor(name: "RSI超賣", points: pts, isBearish: false))
             case .neutral:
                 break
             }
         }
 
-        // ── 布林通道 ──
+        // ── 波動組：布林通道 ──
         if let bbSig = signal.bollingerSignal {
             switch bbSig {
             case .nearUpper:
-                score += 8
+                volatilityGroup += 8
                 factors.append(SellFactor(name: "觸布林上軌", points: 8, isBearish: true))
             case .nearLower:
-                score -= 6
+                volatilityGroup -= 6
                 factors.append(SellFactor(name: "觸布林下軌", points: -6, isBearish: false))
             case .squeeze, .normal:
                 break
             }
         }
 
-        // ── 成交量 ──
+        // ── 波動組：成交量 ──
         if let volSig = signal.volumeSignal {
             switch volSig {
             case .surge:
-                // 爆量配合均線空頭 → 偏空
-                score += 8
+                volatilityGroup += 8
                 factors.append(SellFactor(name: "爆量", points: 8, isBearish: true))
             case .shrink:
-                score += 3
+                volatilityGroup += 3
                 factors.append(SellFactor(name: "量縮", points: 3, isBearish: true))
             case .high, .normal:
                 break
             }
         }
 
-        // ── 移動停利 ──
+        // ── 停利組：移動停利 ──
         if trailingStopTriggered {
-            score += 20
+            trailingGroup += 20
             factors.append(SellFactor(name: "跌破停利線", points: 20, isBearish: true))
         } else if nearTrailingStop {
-            score += 10
+            trailingGroup += 10
             factors.append(SellFactor(name: "接近停利線", points: 10, isBearish: true))
         } else {
-            score -= 5
+            trailingGroup -= 5
             factors.append(SellFactor(name: "安全持有中", points: -5, isBearish: false))
         }
 
-        // ── MA 位置 ──
+        // ── 位置組：MA 位置 ──
         if let ma5 = signal.ma5Position {
             if ma5 == .below {
-                score += 5
+                positionGroup += 5
                 factors.append(SellFactor(name: "價格在MA5下方", points: 5, isBearish: true))
             } else {
-                score -= 3
+                positionGroup -= 3
                 factors.append(SellFactor(name: "價格在MA5上方", points: -3, isBearish: false))
             }
         }
         if let ma20 = signal.ma20Position {
             if ma20 == .below {
-                score += 5
+                positionGroup += 5
                 factors.append(SellFactor(name: "價格在MA20下方", points: 5, isBearish: true))
             } else {
-                score -= 3
+                positionGroup -= 3
                 factors.append(SellFactor(name: "價格在MA20上方", points: -3, isBearish: false))
             }
         }
 
-        // ── 法人動態 ──
+        // ── 籌碼組：法人動態 ──
         if let fs = foreignStreak, abs(fs) >= 3 {
             if fs < 0 {
-                score += 5
+                flowGroup += 5
                 factors.append(SellFactor(name: "外資連賣\(abs(fs))日", points: 5, isBearish: true))
             } else {
-                score -= 3
+                flowGroup -= 3
                 factors.append(SellFactor(name: "外資連買\(fs)日", points: -3, isBearish: false))
             }
         }
         if let ts = trustStreak, abs(ts) >= 3 {
             if ts < 0 {
-                score += 5
+                flowGroup += 5
                 factors.append(SellFactor(name: "投信連賣\(abs(ts))日", points: 5, isBearish: true))
             } else {
-                score -= 3
+                flowGroup -= 3
                 factors.append(SellFactor(name: "投信連買\(ts)日", points: -3, isBearish: false))
             }
         }
 
-        // ── 背離 ──
+        // ── 籌碼組：法人累計淨買超（賣出角度：大量買超偏多持有，大量賣超偏空）──
+        if let fcn = foreignCumulativeNet {
+            if fcn <= -settings.foreignCumulativeLargeThreshold {
+                flowGroup += settings.foreignCumulativeLargePoints
+                factors.append(SellFactor(name: "外資累計賣超\(abs(fcn))張", points: settings.foreignCumulativeLargePoints, isBearish: true))
+            } else if fcn <= -settings.foreignCumulativeSmallThreshold {
+                flowGroup += settings.foreignCumulativeSmallPoints
+                factors.append(SellFactor(name: "外資累計賣超\(abs(fcn))張", points: settings.foreignCumulativeSmallPoints, isBearish: true))
+            } else if fcn >= settings.foreignCumulativeLargeThreshold {
+                flowGroup -= settings.foreignCumulativeLargePoints
+                factors.append(SellFactor(name: "外資累計買超\(fcn)張", points: -settings.foreignCumulativeLargePoints, isBearish: false))
+            } else if fcn >= settings.foreignCumulativeSmallThreshold {
+                flowGroup -= settings.foreignCumulativeSmallPoints
+                factors.append(SellFactor(name: "外資累計買超\(fcn)張", points: -settings.foreignCumulativeSmallPoints, isBearish: false))
+            }
+        }
+        if let tcn = trustCumulativeNet {
+            if tcn <= -settings.trustCumulativeLargeThreshold {
+                flowGroup += settings.trustCumulativeLargePoints
+                factors.append(SellFactor(name: "投信累計賣超\(abs(tcn))張", points: settings.trustCumulativeLargePoints, isBearish: true))
+            } else if tcn <= -settings.trustCumulativeSmallThreshold {
+                flowGroup += settings.trustCumulativeSmallPoints
+                factors.append(SellFactor(name: "投信累計賣超\(abs(tcn))張", points: settings.trustCumulativeSmallPoints, isBearish: true))
+            } else if tcn >= settings.trustCumulativeLargeThreshold {
+                flowGroup -= settings.trustCumulativeLargePoints
+                factors.append(SellFactor(name: "投信累計買超\(tcn)張", points: -settings.trustCumulativeLargePoints, isBearish: false))
+            } else if tcn >= settings.trustCumulativeSmallThreshold {
+                flowGroup -= settings.trustCumulativeSmallPoints
+                factors.append(SellFactor(name: "投信累計買超\(tcn)張", points: -settings.trustCumulativeSmallPoints, isBearish: false))
+            }
+        }
+
+        // ── 籌碼組：融資融券（賣出角度）──
+        if let mc = marginTotalChange, abs(mc) >= settings.marginChangeThreshold {
+            if mc > 0 {
+                // 融資增加 = 散戶追多 → 賣出加分（偏空）
+                let pts = abs(settings.marginIncreasePoints)
+                flowGroup += pts
+                factors.append(SellFactor(name: "融資增加\(mc)張", points: pts, isBearish: true))
+            } else {
+                // 融資減少 = 賣壓釋放 → 賣出減分（偏多）
+                let pts = abs(settings.marginDecreasePoints)
+                flowGroup -= pts
+                factors.append(SellFactor(name: "融資減少\(abs(mc))張", points: -pts, isBearish: false))
+            }
+        }
+        if let sc = shortTotalChange, abs(sc) >= settings.marginChangeThreshold {
+            if sc > 0 {
+                // 融券增加 = 軋空潛力 → 賣出減分（偏多）
+                let pts = abs(settings.shortIncreasePoints)
+                flowGroup -= pts
+                factors.append(SellFactor(name: "融券增加\(sc)張", points: -pts, isBearish: false))
+            } else {
+                // 融券減少 = 回補完畢 → 賣出加分（偏空）
+                let pts = abs(settings.shortDecreasePoints)
+                flowGroup += pts
+                factors.append(SellFactor(name: "融券減少\(abs(sc))張", points: pts, isBearish: true))
+            }
+        }
+
+        // ── 結構組：背離 ──
         for div in signal.divergences {
             switch (div.indicator, div.type) {
             case ("RSI", .bearish):
-                score += 10
+                structureGroup += 10
                 factors.append(SellFactor(name: "RSI頂背離", points: 10, isBearish: true))
             case ("MACD", .bearish):
-                score += 10
+                structureGroup += 10
                 factors.append(SellFactor(name: "MACD頂背離", points: 10, isBearish: true))
             case ("RSI", .bullish):
-                score -= 6
+                structureGroup -= 6
                 factors.append(SellFactor(name: "RSI底背離", points: -6, isBearish: false))
             case ("MACD", .bullish):
-                score -= 6
+                structureGroup -= 6
                 factors.append(SellFactor(name: "MACD底背離", points: -6, isBearish: false))
             default:
                 break
             }
         }
 
-        // ── K 線型態 ──
+        // ── 結構組：K 線型態 ──
         for pattern in signal.candlestickPatterns {
             guard pattern.direction != .neutral else { continue }
             let points: Int
@@ -1514,13 +1633,30 @@ enum TechnicalIndicators {
             case .medium: points = pattern.direction == .bearish ? 5 : -5
             case .low:    points = pattern.direction == .bearish ? 3 : -3
             }
-            score += points
+            structureGroup += points
             factors.append(SellFactor(
                 name: pattern.pattern.rawValue,
                 points: points,
                 isBearish: pattern.direction == .bearish
             ))
         }
+
+        // ── 分組上限（去相關化）──
+        let cap = settings.trendGroupCap
+        let mCap = settings.momentumGroupCap
+        let cappedTrend = min(cap, max(-cap, trendGroup))
+        let cappedMomentum = min(mCap, max(-mCap, momentumGroup))
+
+        if cappedTrend != trendGroup {
+            let diff = cappedTrend - trendGroup
+            factors.append(SellFactor(name: "趨勢組上限", points: diff, isBearish: diff > 0))
+        }
+        if cappedMomentum != momentumGroup {
+            let diff = cappedMomentum - momentumGroup
+            factors.append(SellFactor(name: "動量組上限", points: diff, isBearish: diff > 0))
+        }
+
+        let score = 50 + cappedTrend + cappedMomentum + volatilityGroup + flowGroup + structureGroup + positionGroup + trailingGroup
 
         // Clamp
         let finalScore = min(100, max(0, score))
@@ -1608,176 +1744,250 @@ enum TechnicalIndicators {
         currentPrice: Double,
         foreignStreak: Int?,
         trustStreak: Int?,
+        foreignCumulativeNet: Int? = nil,
+        trustCumulativeNet: Int? = nil,
+        marginTotalChange: Int? = nil,
+        shortTotalChange: Int? = nil,
+        regime: MarketRegime = .sideways,
         settings: BuyScoreSettings = .load()
     ) -> BuyRecommendation {
-        var score = 50
         var factors: [BuyFactor] = []
 
-        // ── 均線交叉 ──
+        // ── 分組小計 ──
+        var trendGroup = 0       // 趨勢組：MA cross, MACD cross, DIF
+        var momentumGroup = 0    // 動量組：KDJ, RSI
+        var volatilityGroup = 0  // 波動組：布林, 成交量
+        var flowGroup = 0        // 籌碼組：法人
+        var structureGroup = 0   // 結構組：背離, K 線型態, 52 週
+        var positionGroup = 0    // 位置組：MA5/MA20 位置
+
+        // ── 趨勢組：均線交叉 ──
         if let maCross = signal.maCross {
             switch maCross {
             case .goldenCross:
-                score += settings.maGoldenCrossPoints
+                trendGroup += settings.maGoldenCrossPoints
                 factors.append(BuyFactor(name: "均線金叉", points: settings.maGoldenCrossPoints, isBullish: true))
             case .deathCross:
-                score += settings.maDeathCrossPoints
+                trendGroup += settings.maDeathCrossPoints
                 factors.append(BuyFactor(name: "均線死叉", points: settings.maDeathCrossPoints, isBullish: false))
             }
         }
 
-        // ── MACD 交叉 ──
+        // ── 趨勢組：MACD 交叉 ──
         if let macdSig = signal.macdSignal {
             switch macdSig {
             case .goldenCross:
-                score += settings.macdGoldenCrossPoints
+                trendGroup += settings.macdGoldenCrossPoints
                 factors.append(BuyFactor(name: "MACD金叉", points: settings.macdGoldenCrossPoints, isBullish: true))
             case .deathCross:
-                score += settings.macdDeathCrossPoints
+                trendGroup += settings.macdDeathCrossPoints
                 factors.append(BuyFactor(name: "MACD死叉", points: settings.macdDeathCrossPoints, isBullish: false))
             case .none:
                 break
             }
         }
 
-        // ── MACD DIF 方向 ──
+        // ── 趨勢組：MACD DIF 方向 ──
         if let dif = signal.macdDIF {
             if dif > 0 {
-                score += settings.macdPositivePoints
+                trendGroup += settings.macdPositivePoints
                 factors.append(BuyFactor(name: "DIF > 0", points: settings.macdPositivePoints, isBullish: true))
             } else if dif < 0 {
-                score += settings.macdNegativePoints
+                trendGroup += settings.macdNegativePoints
                 factors.append(BuyFactor(name: "DIF < 0", points: settings.macdNegativePoints, isBullish: false))
             }
         }
 
-        // ── KDJ 交叉 ──
+        // ── 動量組：KDJ 交叉 ──
         if let kdjSig = signal.kdjSignal {
             switch kdjSig {
             case .goldenCross:
-                score += settings.kdjGoldenCrossPoints
+                momentumGroup += settings.kdjGoldenCrossPoints
                 factors.append(BuyFactor(name: "KD金叉", points: settings.kdjGoldenCrossPoints, isBullish: true))
             case .deathCross:
-                score += settings.kdjDeathCrossPoints
+                momentumGroup += settings.kdjDeathCrossPoints
                 factors.append(BuyFactor(name: "KD死叉", points: settings.kdjDeathCrossPoints, isBullish: false))
             case .none:
                 break
             }
         }
 
-        // ── KDJ 超買超賣 ──
+        // ── 動量組：KDJ 超買超賣（盤整時打折）──
         if let k = signal.kdjK {
+            let discount = regime == .sideways ? Double(settings.sidewaysDiscountPct) / 100.0 : 1.0
             if k < 20 {
-                score += settings.kdjOversoldPoints
-                factors.append(BuyFactor(name: "KD超賣", points: settings.kdjOversoldPoints, isBullish: true))
+                let pts = Int(Double(settings.kdjOversoldPoints) * discount)
+                momentumGroup += pts
+                factors.append(BuyFactor(name: "KD超賣", points: pts, isBullish: true))
             } else if k > 80 {
-                score += settings.kdjOverboughtPoints
-                factors.append(BuyFactor(name: "KD超買", points: settings.kdjOverboughtPoints, isBullish: false))
+                let pts = Int(Double(settings.kdjOverboughtPoints) * discount)
+                momentumGroup += pts
+                factors.append(BuyFactor(name: "KD超買", points: pts, isBullish: false))
             }
         }
 
-        // ── RSI ──
+        // ── 動量組：RSI（盤整時打折）──
         if let rsiSig = signal.rsiSignal {
+            let discount = regime == .sideways ? Double(settings.sidewaysDiscountPct) / 100.0 : 1.0
             switch rsiSig {
             case .oversold:
-                score += settings.rsiOversoldPoints
-                factors.append(BuyFactor(name: "RSI超賣", points: settings.rsiOversoldPoints, isBullish: true))
+                let pts = Int(Double(settings.rsiOversoldPoints) * discount)
+                momentumGroup += pts
+                factors.append(BuyFactor(name: "RSI超賣", points: pts, isBullish: true))
             case .overbought:
-                score += settings.rsiOverboughtPoints
-                factors.append(BuyFactor(name: "RSI超買", points: settings.rsiOverboughtPoints, isBullish: false))
+                let pts = Int(Double(settings.rsiOverboughtPoints) * discount)
+                momentumGroup += pts
+                factors.append(BuyFactor(name: "RSI超買", points: pts, isBullish: false))
             case .neutral:
                 break
             }
         }
 
-        // ── 布林通道 ──
+        // ── 波動組：布林通道 ──
         if let bbSig = signal.bollingerSignal {
             switch bbSig {
             case .nearLower:
-                score += settings.bollingerLowerPoints
+                volatilityGroup += settings.bollingerLowerPoints
                 factors.append(BuyFactor(name: "觸布林下軌", points: settings.bollingerLowerPoints, isBullish: true))
             case .nearUpper:
-                score += settings.bollingerUpperPoints
+                volatilityGroup += settings.bollingerUpperPoints
                 factors.append(BuyFactor(name: "觸布林上軌", points: settings.bollingerUpperPoints, isBullish: false))
             case .squeeze, .normal:
                 break
             }
         }
 
-        // ── 成交量 ──
+        // ── 波動組：成交量 ──
         if let volSig = signal.volumeSignal {
             switch volSig {
             case .surge, .high:
-                score += settings.volumeSurgePoints
+                volatilityGroup += settings.volumeSurgePoints
                 factors.append(BuyFactor(name: "量增", points: settings.volumeSurgePoints, isBullish: true))
             case .shrink:
-                score += settings.volumeShrinkPoints
+                volatilityGroup += settings.volumeShrinkPoints
                 factors.append(BuyFactor(name: "量縮", points: settings.volumeShrinkPoints, isBullish: false))
             case .normal:
                 break
             }
         }
 
-        // ── MA 位置 ──
+        // ── 位置組：MA 位置 ──
         if let ma5 = signal.ma5Position {
             if ma5 == .above {
-                score += settings.aboveMA5Points
+                positionGroup += settings.aboveMA5Points
                 factors.append(BuyFactor(name: "價格在MA5上方", points: settings.aboveMA5Points, isBullish: true))
             } else {
-                score += settings.belowMA5Points
+                positionGroup += settings.belowMA5Points
                 factors.append(BuyFactor(name: "價格在MA5下方", points: settings.belowMA5Points, isBullish: false))
             }
         }
         if let ma20 = signal.ma20Position {
             if ma20 == .above {
-                score += settings.aboveMA20Points
+                positionGroup += settings.aboveMA20Points
                 factors.append(BuyFactor(name: "價格在MA20上方", points: settings.aboveMA20Points, isBullish: true))
             } else {
-                score += settings.belowMA20Points
+                positionGroup += settings.belowMA20Points
                 factors.append(BuyFactor(name: "價格在MA20下方", points: settings.belowMA20Points, isBullish: false))
             }
         }
 
-        // ── 法人動態 ──
+        // ── 籌碼組：法人動態 ──
         if let fs = foreignStreak, abs(fs) >= 3 {
             if fs > 0 {
-                score += settings.foreignBuyStreakPoints
+                flowGroup += settings.foreignBuyStreakPoints
                 factors.append(BuyFactor(name: "外資連買\(fs)日", points: settings.foreignBuyStreakPoints, isBullish: true))
             } else {
-                score += settings.foreignSellStreakPoints
+                flowGroup += settings.foreignSellStreakPoints
                 factors.append(BuyFactor(name: "外資連賣\(abs(fs))日", points: settings.foreignSellStreakPoints, isBullish: false))
             }
         }
         if let ts = trustStreak, abs(ts) >= 3 {
             if ts > 0 {
-                score += settings.trustBuyStreakPoints
+                flowGroup += settings.trustBuyStreakPoints
                 factors.append(BuyFactor(name: "投信連買\(ts)日", points: settings.trustBuyStreakPoints, isBullish: true))
             } else {
-                score += settings.trustSellStreakPoints
+                flowGroup += settings.trustSellStreakPoints
                 factors.append(BuyFactor(name: "投信連賣\(abs(ts))日", points: settings.trustSellStreakPoints, isBullish: false))
             }
         }
 
-        // ── 背離 ──
+        // ── 籌碼組：法人累計淨買超 ──
+        if let fcn = foreignCumulativeNet {
+            if fcn >= settings.foreignCumulativeLargeThreshold {
+                flowGroup += settings.foreignCumulativeLargePoints
+                factors.append(BuyFactor(name: "外資累計買超\(fcn)張", points: settings.foreignCumulativeLargePoints, isBullish: true))
+            } else if fcn >= settings.foreignCumulativeSmallThreshold {
+                flowGroup += settings.foreignCumulativeSmallPoints
+                factors.append(BuyFactor(name: "外資累計買超\(fcn)張", points: settings.foreignCumulativeSmallPoints, isBullish: true))
+            } else if fcn <= -settings.foreignCumulativeLargeThreshold {
+                flowGroup -= settings.foreignCumulativeLargePoints
+                factors.append(BuyFactor(name: "外資累計賣超\(abs(fcn))張", points: -settings.foreignCumulativeLargePoints, isBullish: false))
+            } else if fcn <= -settings.foreignCumulativeSmallThreshold {
+                flowGroup -= settings.foreignCumulativeSmallPoints
+                factors.append(BuyFactor(name: "外資累計賣超\(abs(fcn))張", points: -settings.foreignCumulativeSmallPoints, isBullish: false))
+            }
+        }
+        if let tcn = trustCumulativeNet {
+            if tcn >= settings.trustCumulativeLargeThreshold {
+                flowGroup += settings.trustCumulativeLargePoints
+                factors.append(BuyFactor(name: "投信累計買超\(tcn)張", points: settings.trustCumulativeLargePoints, isBullish: true))
+            } else if tcn >= settings.trustCumulativeSmallThreshold {
+                flowGroup += settings.trustCumulativeSmallPoints
+                factors.append(BuyFactor(name: "投信累計買超\(tcn)張", points: settings.trustCumulativeSmallPoints, isBullish: true))
+            } else if tcn <= -settings.trustCumulativeLargeThreshold {
+                flowGroup -= settings.trustCumulativeLargePoints
+                factors.append(BuyFactor(name: "投信累計賣超\(abs(tcn))張", points: -settings.trustCumulativeLargePoints, isBullish: false))
+            } else if tcn <= -settings.trustCumulativeSmallThreshold {
+                flowGroup -= settings.trustCumulativeSmallPoints
+                factors.append(BuyFactor(name: "投信累計賣超\(abs(tcn))張", points: -settings.trustCumulativeSmallPoints, isBullish: false))
+            }
+        }
+
+        // ── 籌碼組：融資融券（買入角度）──
+        if let mc = marginTotalChange, abs(mc) >= settings.marginChangeThreshold {
+            if mc > 0 {
+                // 融資增加 = 散戶追多 → 買入扣分（偏空）
+                flowGroup += settings.marginIncreasePoints
+                factors.append(BuyFactor(name: "融資增加\(mc)張", points: settings.marginIncreasePoints, isBullish: false))
+            } else {
+                // 融資減少 = 賣壓釋放 → 買入加分（偏多）
+                flowGroup += settings.marginDecreasePoints
+                factors.append(BuyFactor(name: "融資減少\(abs(mc))張", points: settings.marginDecreasePoints, isBullish: true))
+            }
+        }
+        if let sc = shortTotalChange, abs(sc) >= settings.marginChangeThreshold {
+            if sc > 0 {
+                // 融券增加 = 軋空潛力 → 買入加分（偏多）
+                flowGroup += settings.shortIncreasePoints
+                factors.append(BuyFactor(name: "融券增加\(sc)張", points: settings.shortIncreasePoints, isBullish: true))
+            } else {
+                // 融券減少 = 回補完畢 → 買入扣分（偏空）
+                flowGroup += settings.shortDecreasePoints
+                factors.append(BuyFactor(name: "融券減少\(abs(sc))張", points: settings.shortDecreasePoints, isBullish: false))
+            }
+        }
+
+        // ── 結構組：背離 ──
         for div in signal.divergences {
             switch (div.indicator, div.type) {
             case ("RSI", .bullish):
-                score += settings.rsiBullishDivPoints
+                structureGroup += settings.rsiBullishDivPoints
                 factors.append(BuyFactor(name: "RSI底背離", points: settings.rsiBullishDivPoints, isBullish: true))
             case ("MACD", .bullish):
-                score += settings.macdBullishDivPoints
+                structureGroup += settings.macdBullishDivPoints
                 factors.append(BuyFactor(name: "MACD底背離", points: settings.macdBullishDivPoints, isBullish: true))
             case ("RSI", .bearish):
-                score += settings.rsiBearishDivPoints
+                structureGroup += settings.rsiBearishDivPoints
                 factors.append(BuyFactor(name: "RSI頂背離", points: settings.rsiBearishDivPoints, isBullish: false))
             case ("MACD", .bearish):
-                score += settings.macdBearishDivPoints
+                structureGroup += settings.macdBearishDivPoints
                 factors.append(BuyFactor(name: "MACD頂背離", points: settings.macdBearishDivPoints, isBullish: false))
             default:
                 break
             }
         }
 
-        // ── K 線型態 ──
+        // ── 結構組：K 線型態 ──
         for pattern in signal.candlestickPatterns {
             guard pattern.direction != .neutral else { continue }
             let pts: Int
@@ -1790,7 +2000,7 @@ enum TechnicalIndicators {
             case (.low, .bearish):    pts = settings.candleLowBearishPoints
             default:                  pts = 0
             }
-            score += pts
+            structureGroup += pts
             factors.append(BuyFactor(
                 name: pattern.pattern.rawValue,
                 points: pts,
@@ -1798,18 +2008,36 @@ enum TechnicalIndicators {
             ))
         }
 
-        // ── 52 週位置 ──
+        // ── 結構組：52 週位置 ──
         if let low52 = week52Low, let high52 = week52High, high52 > low52, currentPrice > 0 {
             let range52 = high52 - low52
-            let positionPct = (currentPrice - low52) / range52  // 0 = 52週低點, 1 = 52週高點
+            let positionPct = (currentPrice - low52) / range52
             if positionPct <= 0.15 {
-                score += settings.near52WeekLowPoints
+                structureGroup += settings.near52WeekLowPoints
                 factors.append(BuyFactor(name: "接近52週低點", points: settings.near52WeekLowPoints, isBullish: true))
             } else if positionPct >= 0.85 {
-                score += settings.near52WeekHighPoints
+                structureGroup += settings.near52WeekHighPoints
                 factors.append(BuyFactor(name: "接近52週高點", points: settings.near52WeekHighPoints, isBullish: false))
             }
         }
+
+        // ── 分組上限（去相關化）──
+        let cap = settings.trendGroupCap
+        let mCap = settings.momentumGroupCap
+        let cappedTrend = min(cap, max(-cap, trendGroup))
+        let cappedMomentum = min(mCap, max(-mCap, momentumGroup))
+
+        // 如果被壓縮，記錄壓縮因子
+        if cappedTrend != trendGroup {
+            let diff = cappedTrend - trendGroup
+            factors.append(BuyFactor(name: "趨勢組上限", points: diff, isBullish: diff > 0))
+        }
+        if cappedMomentum != momentumGroup {
+            let diff = cappedMomentum - momentumGroup
+            factors.append(BuyFactor(name: "動量組上限", points: diff, isBullish: diff > 0))
+        }
+
+        let score = 50 + cappedTrend + cappedMomentum + volatilityGroup + flowGroup + structureGroup + positionGroup
 
         // Clamp
         let finalScore = min(100, max(0, score))

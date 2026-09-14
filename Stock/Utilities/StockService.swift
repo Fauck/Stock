@@ -370,6 +370,13 @@ actor StockService {
         var trustStreak: Int { Self.streak(days.map(\.trustNet)) }
         var totalStreak: Int { Self.streak(days.map(\.totalNet)) }
 
+        /// 近 N 日外資累計淨買超（張）
+        var foreignCumulativeNet: Int { days.reduce(0) { $0 + $1.foreignNet } }
+        /// 近 N 日投信累計淨買超（張）
+        var trustCumulativeNet: Int { days.reduce(0) { $0 + $1.trustNet } }
+        /// 近 N 日三大法人合計累計（張）
+        var totalCumulativeNet: Int { days.reduce(0) { $0 + $1.totalNet } }
+
         private static func streak(_ values: [Int]) -> Int {
             guard let first = values.first, first != 0 else { return 0 }
             let positive = first > 0
@@ -517,6 +524,192 @@ actor StockService {
             )
         }
         return result
+    }
+
+    // MARK: - 融資融券（信用交易）
+
+    /// 融資融券單日資料
+    struct MarginTradingDayData: Sendable {
+        let date: String           // "yyyyMMdd"
+        let marginBuyBalance: Int  // 融資餘額（張）
+        let marginBuyChange: Int   // 融資增減（張）
+        let shortSellBalance: Int  // 融券餘額（張）
+        let shortSellChange: Int   // 融券增減（張）
+        let dayTradeOffset: Int    // 資券互抵（張）
+    }
+
+    /// 融資融券摘要
+    struct MarginTradingSummary: Sendable {
+        let days: [MarginTradingDayData]   // 最近 N 日（新→舊）
+
+        /// 融資餘額（最新一日）
+        var latestMarginBalance: Int { days.first?.marginBuyBalance ?? 0 }
+        /// 融券餘額（最新一日）
+        var latestShortBalance: Int { days.first?.shortSellBalance ?? 0 }
+        /// 融資累計增減
+        var marginBuyTotalChange: Int { days.reduce(0) { $0 + $1.marginBuyChange } }
+        /// 融券累計增減
+        var shortSellTotalChange: Int { days.reduce(0) { $0 + $1.shortSellChange } }
+        /// 融資連續增減天數（正=連增、負=連減）
+        var marginStreak: Int { Self.streak(days.map(\.marginBuyChange)) }
+        /// 融券連續增減天數
+        var shortStreak: Int { Self.streak(days.map(\.shortSellChange)) }
+
+        private static func streak(_ values: [Int]) -> Int {
+            guard let first = values.first, first != 0 else { return 0 }
+            let positive = first > 0
+            var count = 0
+            for v in values {
+                if (positive && v > 0) || (!positive && v < 0) {
+                    count += 1
+                } else {
+                    break
+                }
+            }
+            return positive ? count : -count
+        }
+    }
+
+    /// TWSE 融資融券 API 回應
+    /// 結構：{ "stat": "OK", "tables": [ { "data": [[String]] }, ... ] }
+    private struct TWSEMarginResponse: Decodable {
+        let stat: String?
+        let tables: [MarginTable]?
+
+        struct MarginTable: Decodable {
+            let data: [[String]]?
+        }
+    }
+
+    /// 取得單日全部個股的融資融券（TWSE 上市）
+    /// - Parameter date: 日期格式 "yyyyMMdd"
+    /// - Returns: [證券代號: MarginTradingDayData]
+    func fetchMarginTradingData(date: String) async throws -> [String: MarginTradingDayData] {
+        let urlString = "https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date=\(date)&selectType=ALL&response=json"
+        guard let url = URL(string: urlString) else {
+            throw StockServiceError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw StockServiceError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw StockServiceError.httpError(http.statusCode)
+        }
+
+        let decoded = try JSONDecoder().decode(TWSEMarginResponse.self, from: data)
+        // 第二張表（index 1）為個股融資融券明細
+        guard decoded.stat == "OK",
+              let tables = decoded.tables, tables.count >= 2,
+              let rows = tables[1].data, !rows.isEmpty else {
+            throw StockServiceError.noData
+        }
+
+        // TWSE 欄位（16 欄）：
+        // [0] 代號, [1] 名稱
+        // 融資: [2] 買進, [3] 賣出, [4] 現金償還, [5] 前日餘額, [6] 今日餘額, [7] 限額
+        // 融券: [8] 買進, [9] 賣出, [10] 現券償還, [11] 前日餘額, [12] 今日餘額, [13] 限額
+        // [14] 資券互抵, [15] 註記
+        var result: [String: MarginTradingDayData] = [:]
+        for row in rows where row.count >= 16 {
+            let code = row[0].trimmingCharacters(in: .whitespaces)
+            guard !code.isEmpty else { continue }
+
+            let marginBalance = Self.parseMarginInt(row[6])
+            let prevMarginBalance = Self.parseMarginInt(row[5])
+            let shortBalance = Self.parseMarginInt(row[12])
+            let prevShortBalance = Self.parseMarginInt(row[11])
+            let offset = Self.parseMarginInt(row[14])
+
+            result[code] = MarginTradingDayData(
+                date: date,
+                marginBuyBalance: marginBalance,
+                marginBuyChange: marginBalance - prevMarginBalance,
+                shortSellBalance: shortBalance,
+                shortSellChange: shortBalance - prevShortBalance,
+                dayTradeOffset: offset
+            )
+        }
+        return result
+    }
+
+    /// TPEx 融資融券 API 回應
+    private struct TPExMarginResponse: Decodable {
+        let tables: [TPExMarginTable]?
+
+        struct TPExMarginTable: Decodable {
+            let data: [[String]]?
+        }
+    }
+
+    /// 取得單日全部個股的融資融券（TPEx 上櫃）
+    /// - Parameter date: 日期格式 "yyyyMMdd"（會轉換為民國日期格式）
+    /// - Returns: [證券代號: MarginTradingDayData]
+    func fetchTPExMarginTradingData(date: String) async throws -> [String: MarginTradingDayData] {
+        guard date.count == 8,
+              let year = Int(date.prefix(4)) else {
+            throw StockServiceError.invalidURL
+        }
+        let rocYear = year - 1911
+        let rocDate = "\(rocYear)/\(date.dropFirst(4).prefix(2))/\(date.dropFirst(6))"
+
+        let urlString = "https://www.tpex.org.tw/web/stock/margin_trading/margin_balance/margin_bal_result.php?l=zh-tw&o=json&d=\(rocDate)&se=EW"
+        guard let url = URL(string: urlString) else {
+            throw StockServiceError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw StockServiceError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw StockServiceError.httpError(http.statusCode)
+        }
+
+        let decoded = try JSONDecoder().decode(TPExMarginResponse.self, from: data)
+        guard let rows = decoded.tables?.first?.data, !rows.isEmpty else {
+            throw StockServiceError.noData
+        }
+
+        // TPEx 欄位（20 欄）：
+        // [0] 代號, [1] 名稱
+        // 融資: [2] 前餘額, [3] 資買, [4] 資賣, [5] 現償, [6] 資餘額, [7] 資屬證金, [8] 使用率, [9] 限額
+        // 融券: [10] 前餘額, [11] 券賣, [12] 券買, [13] 券償, [14] 券餘額, [15] 券屬證金, [16] 使用率, [17] 限額
+        // [18] 資券相抵, [19] 備註
+        var result: [String: MarginTradingDayData] = [:]
+        for row in rows where row.count >= 19 {
+            let code = row[0].trimmingCharacters(in: .whitespaces)
+            guard !code.isEmpty else { continue }
+
+            let marginBalance = Self.parseMarginInt(row[6])
+            let prevMarginBalance = Self.parseMarginInt(row[2])
+            let shortBalance = Self.parseMarginInt(row[14])
+            let prevShortBalance = Self.parseMarginInt(row[10])
+            let offset = Self.parseMarginInt(row[18])
+
+            result[code] = MarginTradingDayData(
+                date: date,
+                marginBuyBalance: marginBalance,
+                marginBuyChange: marginBalance - prevMarginBalance,
+                shortSellBalance: shortBalance,
+                shortSellChange: shortBalance - prevShortBalance,
+                dayTradeOffset: offset
+            )
+        }
+        return result
+    }
+
+    /// 解析帶逗號的整數字串（融資融券資料已是張數，不需除以 1000）
+    private static func parseMarginInt(_ str: String) -> Int {
+        let cleaned = str.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
+        return Int(cleaned) ?? 0
     }
 }
 

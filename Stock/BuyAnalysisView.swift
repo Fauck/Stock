@@ -4,6 +4,7 @@ struct BuyAnalysisView: View {
 
     @State private var vm = BuyAnalysisViewModel()
     @FocusState private var isSearchFocused: Bool
+    @State private var expandedSections: Set<String> = []
 
     var body: some View {
         NavigationStack {
@@ -117,21 +118,54 @@ struct BuyAnalysisView: View {
         ScrollView {
             VStack(spacing: 12) {
                 priceHeaderCard
+
                 if let rec = vm.recommendation {
                     scoreCard(rec)
                     factorsCard(rec)
                 }
+
                 if let signal = vm.signalSummary {
-                    indicatorSummaryCard(signal)
+                    collapsibleCard(
+                        id: "indicators",
+                        icon: "chart.bar.xaxis",
+                        title: "技術指標摘要",
+                        summary: indicatorSummaryText(signal)
+                    ) {
+                        indicatorContent(signal)
+                    }
                 }
+
                 if !vm.bullishPatterns.isEmpty {
-                    kLinePatternCard
+                    collapsibleCard(
+                        id: "patterns",
+                        icon: "chart.bar.doc.horizontal",
+                        title: "多頭 K 線型態",
+                        summary: patternSummaryText()
+                    ) {
+                        patternContent
+                    }
                 }
+
                 if let inst = vm.institutionalSummary {
-                    institutionalCard(inst)
+                    collapsibleCard(
+                        id: "institutional",
+                        icon: "building.columns",
+                        title: "法人動態",
+                        summary: institutionalSummaryText(inst)
+                    ) {
+                        institutionalContent(inst)
+                    }
                 }
+
                 if vm.week52High != nil || vm.week52Low != nil {
-                    week52Card
+                    collapsibleCard(
+                        id: "week52",
+                        icon: "calendar",
+                        title: "52 週區間",
+                        summary: week52SummaryText()
+                    ) {
+                        week52Content
+                    }
                 }
 
                 // 免責聲明
@@ -148,6 +182,109 @@ struct BuyAnalysisView: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
         }
+    }
+
+    // MARK: - Collapsible Card
+
+    @ViewBuilder
+    private func collapsibleCard<Content: View>(
+        id: String,
+        icon: String,
+        title: String,
+        summary: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let isExpanded = expandedSections.contains(id)
+
+        VStack(alignment: .leading, spacing: isExpanded ? 8 : 4) {
+            // Header row (always visible)
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text(title)
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(AppColor.textSecondary.opacity(0.5))
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+            }
+
+            if isExpanded {
+                content()
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            } else {
+                Text(summary)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppColor.textSecondary)
+                    .lineLimit(1)
+                    .transition(.opacity)
+            }
+        }
+        .cardStyle()
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                if isExpanded {
+                    expandedSections.remove(id)
+                } else {
+                    expandedSections.insert(id)
+                }
+            }
+        }
+    }
+
+    // MARK: - Summary Helpers
+
+    private func indicatorSummaryText(_ signal: TechnicalIndicators.SignalSummary) -> String {
+        var parts: [String] = []
+        if let cross = signal.maCross {
+            parts.append(cross.label)
+        }
+        if let rsi = signal.rsi {
+            parts.append("RSI \(String(format: "%.1f", rsi))")
+        }
+        if let kdj = signal.kdjSignal, let label = kdj.label {
+            parts.append("KD\(label)")
+        }
+        if let macd = signal.macdSignal, let label = macd.label {
+            parts.append("MACD\(label)")
+        }
+        let result = Array(parts.prefix(3)).joined(separator: " · ")
+        return result.isEmpty ? "無顯著信號" : result
+    }
+
+    private func patternSummaryText() -> String {
+        let names = vm.bullishPatterns.prefix(3).map { $0.pattern.rawValue }
+        let result = names.joined(separator: " · ")
+        return result.isEmpty ? "無多頭型態" : result
+    }
+
+    private func institutionalSummaryText(_ inst: StockService.InstitutionalSummary) -> String {
+        var parts: [String] = []
+        let fs = inst.foreignStreak
+        if abs(fs) >= 2 {
+            parts.append(fs > 0 ? "外資連買\(fs)日" : "外資連賣\(abs(fs))日")
+        } else {
+            let net = inst.latestForeignNet
+            parts.append(net >= 0 ? "外資買超\(net)張" : "外資賣超\(abs(net))張")
+        }
+        let ts = inst.trustStreak
+        if abs(ts) >= 2 {
+            parts.append(ts > 0 ? "投信連買\(ts)日" : "投信連賣\(abs(ts))日")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func week52SummaryText() -> String {
+        guard let low = vm.week52Low, let high = vm.week52High, high > low else {
+            return "資料不足"
+        }
+        let position = (vm.currentPrice - low) / (high - low)
+        let pct = min(100, max(0, position * 100))
+        return "目前位於 \(String(format: "%.0f", pct))% 位置"
     }
 
     // MARK: - Price Header
@@ -177,7 +314,7 @@ struct BuyAnalysisView: View {
         .cardStyle()
     }
 
-    // MARK: - Score Card
+    // MARK: - Score Card (Half-Circle Gauge)
 
     private func scoreCard(_ rec: TechnicalIndicators.BuyRecommendation) -> some View {
         let level = rec.level
@@ -193,47 +330,32 @@ struct BuyAnalysisView: View {
                     .foregroundStyle(AppColor.textSecondary)
             }
 
-            VStack(spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(spacing: 4) {
+                ScoreGaugeView(
+                    score: rec.score,
+                    level: level,
+                    levelColor: levelColor
+                )
+                .frame(height: 110)
+
+                HStack(spacing: 6) {
                     Image(systemName: level.icon)
-                        .font(.system(size: 16))
+                        .font(.system(size: 14))
                         .foregroundStyle(levelColor)
                     Text(level.label)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundStyle(levelColor)
-                    Spacer()
-                    Text("\(rec.score)")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
-                        .foregroundStyle(levelColor)
-                    + Text(" / 100")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(AppColor.textSecondary)
                 }
-
-                // 進度條
-                GeometryReader { geo in
-                    let width = geo.size.width
-                    let fillWidth = width * CGFloat(rec.score) / 100
-
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(AppColor.divider)
-                            .frame(height: 6)
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(levelColor)
-                            .frame(width: max(0, fillWidth), height: 6)
-                    }
-                }
-                .frame(height: 6)
             }
-            .padding(10)
-            .background(levelColor.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(levelColor.opacity(0.06))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .cardStyle()
     }
 
-    // MARK: - Factors Card
+    // MARK: - Factors Card (with Stacked Bar)
 
     private func factorsCard(_ rec: TechnicalIndicators.BuyRecommendation) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -247,6 +369,43 @@ struct BuyAnalysisView: View {
             }
 
             if !rec.factors.isEmpty {
+                // Stacked bar
+                let bullishTotal = rec.factors.filter(\.isBullish).map(\.points).reduce(0, +)
+                let bearishTotal = abs(rec.factors.filter { !$0.isBullish }.map(\.points).reduce(0, +))
+                let barTotal = bullishTotal + bearishTotal
+
+                if barTotal > 0 {
+                    VStack(spacing: 4) {
+                        GeometryReader { geo in
+                            let width = geo.size.width
+                            let bullishWidth = width * CGFloat(bullishTotal) / CGFloat(barTotal)
+                            let bearishWidth = width * CGFloat(bearishTotal) / CGFloat(barTotal)
+
+                            HStack(spacing: 0) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(AppColor.softUp)
+                                    .frame(width: max(0, bullishWidth), height: 8)
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(AppColor.softDown)
+                                    .frame(width: max(0, bearishWidth), height: 8)
+                            }
+                        }
+                        .frame(height: 8)
+
+                        HStack {
+                            Text("偏多 +\(bullishTotal)")
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .foregroundStyle(AppColor.softUp)
+                            Spacer()
+                            Text("偏空 -\(bearishTotal)")
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .foregroundStyle(AppColor.softDown)
+                        }
+                    }
+                    .padding(.bottom, 4)
+                }
+
+                // Factor list
                 let columns = [
                     GridItem(.flexible(), spacing: 6),
                     GridItem(.flexible(), spacing: 6)
@@ -273,177 +432,127 @@ struct BuyAnalysisView: View {
         .cardStyle()
     }
 
-    // MARK: - Indicator Summary Card
+    // MARK: - Indicator Content (inside collapsible)
 
-    private func indicatorSummaryCard(_ signal: TechnicalIndicators.SignalSummary) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 4) {
-                Image(systemName: "chart.bar.xaxis")
-                    .font(.warmCaption2())
-                    .foregroundStyle(AppColor.primary)
-                Text("技術指標摘要")
-                    .font(.warmCaption())
+    private func indicatorContent(_ signal: TechnicalIndicators.SignalSummary) -> some View {
+        let rows = buildIndicatorRows(signal)
+        return ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+            HStack {
+                Text(row.0)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+                Text(row.1)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(row.2)
             }
+        }
+    }
 
-            let rows: [(String, String, Color)] = buildIndicatorRows(signal)
+    // MARK: - K-Line Pattern Content (inside collapsible)
 
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+    private var patternContent: some View {
+        ForEach(vm.bullishPatterns, id: \.pattern) { p in
+            HStack(spacing: 6) {
+                reliabilityBadge(p.reliability)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(p.pattern.rawValue)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(AppColor.textMain)
+                    Text(p.description)
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary)
+                }
+                Spacer()
+                if p.barsAgo == 0 {
+                    Text("今日")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.softUp)
+                } else {
+                    Text("\(p.barsAgo)日前")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary)
+                }
+            }
+            .padding(.vertical, 4)
+            if p.id != vm.bullishPatterns.last?.id {
+                Divider().foregroundStyle(AppColor.divider)
+            }
+        }
+    }
+
+    // MARK: - Institutional Content (inside collapsible)
+
+    private func institutionalContent(_ inst: StockService.InstitutionalSummary) -> some View {
+        HStack(spacing: 0) {
+            institutionalColumn(
+                title: "外資",
+                streak: inst.foreignStreak,
+                latestNet: inst.latestForeignNet
+            )
+            Spacer()
+            institutionalColumn(
+                title: "投信",
+                streak: inst.trustStreak,
+                latestNet: inst.latestTrustNet
+            )
+            Spacer()
+            institutionalColumn(
+                title: "自營商",
+                streak: 0,
+                latestNet: inst.latestDealerNet
+            )
+        }
+    }
+
+    // MARK: - 52 Week Content (inside collapsible)
+
+    @ViewBuilder
+    private var week52Content: some View {
+        if let low = vm.week52Low, let high = vm.week52High, high > low {
+            let range = high - low
+            let position = (vm.currentPrice - low) / range
+            let clampedPos = min(1, max(0, position))
+
+            VStack(spacing: 6) {
+                GeometryReader { geo in
+                    let width = geo.size.width
+                    let markerX = width * clampedPos
+
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(
+                                LinearGradient(
+                                    colors: [AppColor.softDown, AppColor.softDown.opacity(0.3), AppColor.softUp.opacity(0.3), AppColor.softUp],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(height: 8)
+
+                        Circle()
+                            .fill(AppColor.primary)
+                            .frame(width: 12, height: 12)
+                            .offset(x: markerX - 6)
+                    }
+                }
+                .frame(height: 12)
+
                 HStack {
-                    Text(row.0)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                    Text(formatPrice(low))
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.softDown)
+                    Spacer()
+                    Text(String(format: "%.0f%%", clampedPos * 100))
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
                         .foregroundStyle(AppColor.textSecondary)
                     Spacer()
-                    Text(row.1)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(row.2)
+                    Text(formatPrice(high))
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.softUp)
                 }
             }
         }
-        .cardStyle()
-    }
-
-    // MARK: - K-Line Pattern Card
-
-    private var kLinePatternCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 4) {
-                Image(systemName: "candybarphone")
-                    .font(.warmCaption2())
-                    .foregroundStyle(AppColor.primary)
-                Text("多頭 K 線型態")
-                    .font(.warmCaption())
-                    .foregroundStyle(AppColor.textSecondary)
-            }
-
-            ForEach(vm.bullishPatterns, id: \.pattern) { p in
-                HStack(spacing: 6) {
-                    reliabilityBadge(p.reliability)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(p.pattern.rawValue)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(AppColor.textMain)
-                        Text(p.description)
-                            .font(.system(size: 10, design: .rounded))
-                            .foregroundStyle(AppColor.textSecondary)
-                    }
-                    Spacer()
-                    if p.barsAgo == 0 {
-                        Text("今日")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
-                            .foregroundStyle(AppColor.softUp)
-                    } else {
-                        Text("\(p.barsAgo)日前")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
-                            .foregroundStyle(AppColor.textSecondary)
-                    }
-                }
-                .padding(.vertical, 4)
-                if p.id != vm.bullishPatterns.last?.id {
-                    Divider().foregroundStyle(AppColor.divider)
-                }
-            }
-        }
-        .cardStyle()
-    }
-
-    // MARK: - Institutional Card
-
-    private func institutionalCard(_ inst: StockService.InstitutionalSummary) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 4) {
-                Image(systemName: "building.columns")
-                    .font(.warmCaption2())
-                    .foregroundStyle(AppColor.primary)
-                Text("法人動態")
-                    .font(.warmCaption())
-                    .foregroundStyle(AppColor.textSecondary)
-            }
-
-            HStack(spacing: 0) {
-                institutionalColumn(
-                    title: "外資",
-                    streak: inst.foreignStreak,
-                    latestNet: inst.latestForeignNet
-                )
-                Spacer()
-                institutionalColumn(
-                    title: "投信",
-                    streak: inst.trustStreak,
-                    latestNet: inst.latestTrustNet
-                )
-                Spacer()
-                institutionalColumn(
-                    title: "自營商",
-                    streak: 0,
-                    latestNet: inst.latestDealerNet
-                )
-            }
-        }
-        .cardStyle()
-    }
-
-    // MARK: - 52 Week Card
-
-    private var week52Card: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 4) {
-                Image(systemName: "calendar")
-                    .font(.warmCaption2())
-                    .foregroundStyle(AppColor.primary)
-                Text("52 週區間")
-                    .font(.warmCaption())
-                    .foregroundStyle(AppColor.textSecondary)
-            }
-
-            if let low = vm.week52Low, let high = vm.week52High, high > low {
-                let range = high - low
-                let position = (vm.currentPrice - low) / range
-                let clampedPos = min(1, max(0, position))
-
-                VStack(spacing: 6) {
-                    GeometryReader { geo in
-                        let width = geo.size.width
-                        let markerX = width * clampedPos
-
-                        ZStack(alignment: .leading) {
-                            // 背景
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [AppColor.softDown, AppColor.softDown.opacity(0.3), AppColor.softUp.opacity(0.3), AppColor.softUp],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .frame(height: 8)
-
-                            // 標記
-                            Circle()
-                                .fill(AppColor.primary)
-                                .frame(width: 12, height: 12)
-                                .offset(x: markerX - 6)
-                        }
-                    }
-                    .frame(height: 12)
-
-                    HStack {
-                        Text(formatPrice(low))
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                            .foregroundStyle(AppColor.softDown)
-                        Spacer()
-                        Text(String(format: "%.0f%%", clampedPos * 100))
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .foregroundStyle(AppColor.textSecondary)
-                        Spacer()
-                        Text(formatPrice(high))
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                            .foregroundStyle(AppColor.softUp)
-                    }
-                }
-            }
-        }
-        .cardStyle()
     }
 
     // MARK: - Helpers
@@ -499,43 +608,36 @@ struct BuyAnalysisView: View {
     private func buildIndicatorRows(_ signal: TechnicalIndicators.SignalSummary) -> [(String, String, Color)] {
         var rows: [(String, String, Color)] = []
 
-        // 均線
         if let cross = signal.maCross {
             rows.append(("MA 交叉", cross.label, cross == .goldenCross ? AppColor.softUp : AppColor.softDown))
         }
 
-        // RSI
         if let rsi = signal.rsi {
             let color: Color = rsi > 80 ? AppColor.softDown : (rsi < 20 ? AppColor.softUp : AppColor.textMain)
             rows.append(("RSI", String(format: "%.1f", rsi), color))
         }
 
-        // KDJ
         if let k = signal.kdjK, let d = signal.kdjD {
             let status = signal.kdjSignal?.label ?? "—"
             let color: Color = k < 20 ? AppColor.softUp : (k > 80 ? AppColor.softDown : AppColor.textMain)
             rows.append(("KD", "K:\(String(format: "%.0f", k)) D:\(String(format: "%.0f", d)) \(status)", color))
         }
 
-        // MACD
         if let dif = signal.macdDIF, let dea = signal.macdDEA {
             let status = signal.macdSignal?.label ?? "—"
             let color: Color = dif > dea ? AppColor.softUp : AppColor.softDown
             rows.append(("MACD", "DIF:\(String(format: "%.2f", dif)) \(status)", color))
         }
 
-        // 布林
         if let bbSig = signal.bollingerSignal, let label = bbSig.label {
             let color: Color = bbSig == .nearLower ? AppColor.softUp : (bbSig == .nearUpper ? AppColor.softDown : AppColor.textMain)
             rows.append(("布林通道", label, color))
         }
 
-        // 成交量
         if let vol = signal.volumeSignal, let label = vol.label {
             rows.append(("成交量", label, vol == .shrink ? AppColor.softDown : AppColor.textMain))
         }
 
-        // 量比
         if let ratio = signal.volumeRatio {
             rows.append(("量比", String(format: "%.2f", ratio), AppColor.textMain))
         }
@@ -551,6 +653,85 @@ struct BuyAnalysisView: View {
         } else {
             return String(format: "%.2f", price)
         }
+    }
+}
+
+// MARK: - Score Gauge View (Half-Circle)
+
+private struct ScoreGaugeView: View {
+    let score: Int
+    let level: TechnicalIndicators.BuyLevel
+    let levelColor: Color
+
+    @State private var animatedProgress: Double = 0
+
+    var body: some View {
+        GeometryReader { geo in
+            let size = min(geo.size.width, geo.size.height * 2)
+            let lineWidth: CGFloat = 14
+            let radius = (size - lineWidth) / 2
+
+            ZStack {
+                // Background arc
+                SemiCircleArc()
+                    .stroke(AppColor.divider, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    .frame(width: size, height: size / 2)
+
+                // Filled arc
+                SemiCircleArc()
+                    .trim(from: 0, to: animatedProgress)
+                    .stroke(
+                        AngularGradient(
+                            colors: [AppColor.softDown, .orange, AppColor.softUp],
+                            center: .bottom,
+                            startAngle: .degrees(180),
+                            endAngle: .degrees(360)
+                        ),
+                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                    )
+                    .frame(width: size, height: size / 2)
+
+                // Score text
+                VStack(spacing: 0) {
+                    Text("\(score)")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(levelColor)
+                    Text("/ 100")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary)
+                }
+                .offset(y: radius * 0.15)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.8)) {
+                animatedProgress = Double(score) / 100.0
+            }
+        }
+        .onChange(of: score) { _, newValue in
+            animatedProgress = 0
+            withAnimation(.easeOut(duration: 0.8)) {
+                animatedProgress = Double(newValue) / 100.0
+            }
+        }
+    }
+}
+
+/// A half-circle arc shape drawn from 180° to 360° (left to right along the top)
+private struct SemiCircleArc: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let center = CGPoint(x: rect.midX, y: rect.maxY)
+        let radius = min(rect.width, rect.height * 2) / 2
+        path.addArc(
+            center: center,
+            radius: radius,
+            startAngle: .degrees(180),
+            endAngle: .degrees(360),
+            clockwise: false
+        )
+        return path
     }
 }
 

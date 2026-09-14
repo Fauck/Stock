@@ -11,6 +11,7 @@ import SwiftData
 /// K 線走勢圖卡片，顯示歷史 OHLC 蠟燭圖與買賣標記
 struct KLineChartView: View {
     let vm: KLineChartViewModel
+    @State private var markersAppeared = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -24,7 +25,11 @@ struct KLineChartView: View {
                 emptyState
             } else {
                 chartCanvas
-                if let selected = vm.selectedCandle {
+                indicatorChipBar
+                if vm.isDragging, let chIdx = vm.crosshairIndex,
+                   chIdx >= 0, chIdx < vm.candles.count {
+                    crosshairTooltip(vm.candles[chIdx], index: chIdx)
+                } else if let selected = vm.selectedCandle {
                     tooltipView(selected)
                 }
             }
@@ -43,8 +48,6 @@ struct KLineChartView: View {
                 .foregroundStyle(AppColor.textMain)
             Spacer()
             if !vm.candles.isEmpty {
-                indicatorToggle("MA", isOn: vm.showMA) { vm.showMA.toggle() }
-                indicatorToggle("量", isOn: vm.showVolume) { vm.showVolume.toggle() }
                 Text("\(vm.candles.count) 日")
                     .font(.warmCaption2())
                     .foregroundStyle(AppColor.textSecondary)
@@ -52,16 +55,31 @@ struct KLineChartView: View {
         }
     }
 
-    private func indicatorToggle(_ label: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+    /// 底部指標切換 Chip 列
+    private var indicatorChipBar: some View {
+        HStack(spacing: 8) {
+            indicatorChip("MA5", isOn: vm.showMA5) { vm.showMA5.toggle() }
+            indicatorChip("MA20", isOn: vm.showMA20) { vm.showMA20.toggle() }
+            indicatorChip("量", isOn: vm.showVolume) { vm.showVolume.toggle() }
+            Spacer()
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 6)
+    }
+
+    private func indicatorChip(_ label: String, isOn: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.warmCaption2())
-                .fontWeight(.medium)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(isOn ? AppColor.primary : AppColor.background)
-                .foregroundStyle(isOn ? .white : AppColor.textMain)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(isOn ? AppColor.primary.opacity(0.15) : AppColor.background)
+                .foregroundStyle(isOn ? AppColor.primary : AppColor.textSecondary)
                 .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(isOn ? AppColor.primary.opacity(0.4) : AppColor.divider, lineWidth: 0.5)
+                )
         }
         .buttonStyle(.plain)
     }
@@ -163,16 +181,20 @@ struct KLineChartView: View {
                 drawCandles(context: context, layout: layout, area: area)
 
                 // MA 均線
-                if vm.showMA {
+                if vm.showMA5 {
                     drawMALine(context: context, values: vm.ma5,
                                color: AppColor.softUp.opacity(0.8), layout: layout, area: area)
+                }
+                if vm.showMA20 {
                     drawMALine(context: context, values: vm.ma20,
                                color: AppColor.softDown.opacity(0.8), layout: layout, area: area)
-                    drawMALegend(context: context, area: area)
+                }
+                if vm.showMA5 || vm.showMA20 {
+                    drawMALegend(context: context, area: area, showMA5: vm.showMA5, showMA20: vm.showMA20)
                 }
 
                 // 選中高亮
-                if let idx = vm.selectedCandleIndex, idx >= 0, idx < candles.count {
+                if !vm.isDragging, let idx = vm.selectedCandleIndex, idx >= 0, idx < candles.count {
                     let x = layout.xForIndex(idx, in: area)
                     var highlightPath = Path()
                     let highlightBottom = vm.showVolume ? layout.volumeArea(in: size).maxY : area.maxY
@@ -185,15 +207,57 @@ struct KLineChartView: View {
                     )
                 }
 
-                // 買入標記（單筆 or 多筆）
-                if layout.buyIndex != nil {
-                    drawBuyMarker(context: context, layout: layout, area: area)
-                } else if !layout.buyIndices.isEmpty {
-                    drawBuyMarkers(context: context, layout: layout, area: area)
+                // 十字游標（長按拖動時）
+                if vm.isDragging, let chIdx = vm.crosshairIndex,
+                   chIdx >= 0, chIdx < candles.count {
+                    let chCandle = candles[chIdx]
+                    let chX = layout.xForIndex(chIdx, in: area)
+                    let chY = layout.yForPrice(chCandle.close, in: area)
+                    let chBottom = vm.showVolume ? layout.volumeArea(in: size).maxY : area.maxY
+                    let chColor = AppColor.textMain.opacity(0.6)
+                    let dashStyle = StrokeStyle(lineWidth: 0.5, dash: [4, 3])
+
+                    // 垂直線
+                    var vLine = Path()
+                    vLine.move(to: CGPoint(x: chX, y: area.minY))
+                    vLine.addLine(to: CGPoint(x: chX, y: chBottom))
+                    context.stroke(vLine, with: .color(chColor), style: dashStyle)
+
+                    // 水平線
+                    var hLine = Path()
+                    hLine.move(to: CGPoint(x: area.minX, y: chY))
+                    hLine.addLine(to: CGPoint(x: area.maxX, y: chY))
+                    context.stroke(hLine, with: .color(chColor), style: dashStyle)
+
+                    // 右側價格標籤
+                    let priceStr = chCandle.close >= 100
+                        ? String(format: "%.0f", chCandle.close)
+                        : String(format: "%.2f", chCandle.close)
+                    let priceBadge = Text(priceStr)
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white)
+                    let badgePt = CGPoint(x: area.maxX + 2, y: chY)
+                    // 背景矩形
+                    let badgeRect = CGRect(x: badgePt.x, y: badgePt.y - 7, width: 38, height: 14)
+                    context.fill(
+                        Path(roundedRect: badgeRect, cornerRadius: 3),
+                        with: .color(AppColor.textMain.opacity(0.75))
+                    )
+                    context.draw(context.resolve(priceBadge), at: CGPoint(x: badgeRect.midX, y: badgeRect.midY), anchor: .center)
+
+                    // 頂部日期標籤
+                    let dateText = Text(chCandle.dateLabel)
+                        .font(.system(size: 8, weight: .medium, design: .rounded))
+                        .foregroundColor(.white)
+                    let dateBadgeRect = CGRect(x: chX - 18, y: area.minY - 14, width: 36, height: 13)
+                    context.fill(
+                        Path(roundedRect: dateBadgeRect, cornerRadius: 3),
+                        with: .color(AppColor.textMain.opacity(0.75))
+                    )
+                    context.draw(context.resolve(dateText), at: CGPoint(x: dateBadgeRect.midX, y: dateBadgeRect.midY), anchor: .center)
                 }
 
-                // 賣出標記
-                drawSellMarker(context: context, layout: layout, area: area)
+                // 買入/賣出標記（改用 SwiftUI overlay 繪製以支援動畫）
 
                 // 右側標註徽章（停損、計畫、買入價、賣出價 — 自動避開重疊）
                 drawRightAnnotations(context: context, layout: layout, area: area, size: size)
@@ -207,8 +271,32 @@ struct KLineChartView: View {
                     Color.clear
                         .contentShape(Rectangle())
                         .gesture(
+                            LongPressGesture(minimumDuration: 0.3)
+                                .sequenced(before: DragGesture(minimumDistance: 0))
+                                .onChanged { value in
+                                    switch value {
+                                    case .second(true, let drag):
+                                        guard let drag = drag else { return }
+                                        let size = geo.size
+                                        let layout = ChartLayout(candles: vm.candles, vm: vm)
+                                        let area = layout.drawableArea(in: size)
+                                        if let idx = layout.indexForX(drag.location.x, in: area) {
+                                            vm.isDragging = true
+                                            vm.crosshairIndex = idx
+                                        }
+                                    default:
+                                        break
+                                    }
+                                }
+                                .onEnded { _ in
+                                    vm.isDragging = false
+                                    vm.crosshairIndex = nil
+                                }
+                        )
+                        .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onEnded { value in
+                                    guard !vm.isDragging else { return }
                                     let size = geo.size
                                     let layout = ChartLayout(candles: vm.candles, vm: vm)
                                     let area = layout.drawableArea(in: size)
@@ -221,6 +309,52 @@ struct KLineChartView: View {
                                     }
                                 }
                         )
+                }
+            }
+            // 買賣標記 overlay（帶動畫）
+            .overlay {
+                GeometryReader { geo in
+                    let size = geo.size
+                    let area = layout.drawableArea(in: size)
+
+                    // 買入標記
+                    ForEach(Array(markerPositions(layout: layout, area: area, isBuy: true).enumerated()), id: \.offset) { idx, pos in
+                        markerTriangle(isBuy: true, color: AppColor.secondary)
+                            .position(x: pos.x, y: pos.y)
+                            .scaleEffect(markersAppeared ? 1 : 0.01)
+                            .opacity(markersAppeared ? 1 : 0)
+                            .animation(
+                                .spring(response: 0.5, dampingFraction: 0.6)
+                                .delay(Double(idx) * 0.1),
+                                value: markersAppeared
+                            )
+                    }
+
+                    // 賣出標記
+                    if let sellPos = sellMarkerPosition(layout: layout, area: area) {
+                        let isProfit = (vm.investment?.sellPrice ?? 0) >= (vm.investment?.buyPrice ?? 0)
+                        let color = isProfit ? AppColor.softUp : AppColor.softDown
+                        markerTriangle(isBuy: false, color: color)
+                            .position(x: sellPos.x, y: sellPos.y)
+                            .scaleEffect(markersAppeared ? 1 : 0.01)
+                            .opacity(markersAppeared ? 1 : 0)
+                            .animation(
+                                .spring(response: 0.5, dampingFraction: 0.6).delay(0.2),
+                                value: markersAppeared
+                            )
+                    }
+                }
+                .allowsHitTesting(false)
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    markersAppeared = true
+                }
+            }
+            .onChange(of: vm.candles.count) {
+                markersAppeared = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    markersAppeared = true
                 }
             }
 
@@ -299,76 +433,62 @@ struct KLineChartView: View {
         )
     }
 
-    private func drawBuyMarker(context: GraphicsContext, layout: ChartLayout, area: CGRect) {
-        guard let idx = layout.buyIndex else { return }
-        let x = layout.xForIndex(idx, in: area)
-        let candle = vm.candles[idx]
-        let lowY = layout.yForPrice(candle.low, in: area)
+    // MARK: - Animated Marker Helpers
 
-        // 確保標記在可視範圍內（向下偏移，但不超出區域）
-        let y = min(lowY + 12, area.maxY - 4)
+    /// 計算買入標記位置
+    private func markerPositions(layout: ChartLayout, area: CGRect, isBuy: Bool) -> [CGPoint] {
+        var positions: [CGPoint] = []
 
-        // 上三角
-        let size: CGFloat = 8
-        var triangle = Path()
-        triangle.move(to: CGPoint(x: x, y: y - size))
-        triangle.addLine(to: CGPoint(x: x - size / 2, y: y))
-        triangle.addLine(to: CGPoint(x: x + size / 2, y: y))
-        triangle.closeSubpath()
-        context.fill(triangle, with: .color(AppColor.secondary))
-
-        // "買" 標籤
-        let text = Text("買").font(.system(size: 9, weight: .bold, design: .rounded)).foregroundColor(AppColor.secondary)
-        context.draw(context.resolve(text), at: CGPoint(x: x, y: min(y + 7, area.maxY)), anchor: .center)
-    }
-
-    /// 庫存總覽用：多筆買入標記
-    private func drawBuyMarkers(context: GraphicsContext, layout: ChartLayout, area: CGRect) {
-        for marker in layout.buyIndices {
-            let idx = marker.index
-            guard idx >= 0, idx < vm.candles.count else { continue }
-            let x = layout.xForIndex(idx, in: area)
-            let candle = vm.candles[idx]
-            let lowY = layout.yForPrice(candle.low, in: area)
-            let y = min(lowY + 12, area.maxY - 4)
-
-            let size: CGFloat = 8
-            var triangle = Path()
-            triangle.move(to: CGPoint(x: x, y: y - size))
-            triangle.addLine(to: CGPoint(x: x - size / 2, y: y))
-            triangle.addLine(to: CGPoint(x: x + size / 2, y: y))
-            triangle.closeSubpath()
-            context.fill(triangle, with: .color(AppColor.secondary))
-
-            let text = Text("買").font(.system(size: 9, weight: .bold, design: .rounded)).foregroundColor(AppColor.secondary)
-            context.draw(context.resolve(text), at: CGPoint(x: x, y: min(y + 7, area.maxY)), anchor: .center)
+        if isBuy {
+            // 單筆買入
+            if let idx = layout.buyIndex, idx >= 0, idx < vm.candles.count {
+                let x = layout.xForIndex(idx, in: area)
+                let lowY = layout.yForPrice(vm.candles[idx].low, in: area)
+                let y = min(lowY + 16, area.maxY - 4)
+                positions.append(CGPoint(x: x, y: y))
+            }
+            // 多筆買入
+            if layout.buyIndex == nil {
+                for marker in layout.buyIndices {
+                    let idx = marker.index
+                    guard idx >= 0, idx < vm.candles.count else { continue }
+                    let x = layout.xForIndex(idx, in: area)
+                    let lowY = layout.yForPrice(vm.candles[idx].low, in: area)
+                    let y = min(lowY + 16, area.maxY - 4)
+                    positions.append(CGPoint(x: x, y: y))
+                }
+            }
         }
+
+        return positions
     }
 
-    private func drawSellMarker(context: GraphicsContext, layout: ChartLayout, area: CGRect) {
-        guard let idx = layout.sellIndex else { return }
+    /// 計算賣出標記位置
+    private func sellMarkerPosition(layout: ChartLayout, area: CGRect) -> CGPoint? {
+        guard let idx = layout.sellIndex, idx >= 0, idx < vm.candles.count else { return nil }
         let x = layout.xForIndex(idx, in: area)
-        let candle = vm.candles[idx]
-        let highY = layout.yForPrice(candle.high, in: area)
+        let highY = layout.yForPrice(vm.candles[idx].high, in: area)
+        let y = max(highY - 16, area.minY + 4)
+        return CGPoint(x: x, y: y)
+    }
 
-        // 確保標記在可視範圍內（向上偏移，但不超出區域）
-        let y = max(highY - 12, area.minY + 4)
-
-        let isProfit = (vm.investment?.sellPrice ?? 0) >= (vm.investment?.buyPrice ?? 0)
-        let color = isProfit ? AppColor.softUp : AppColor.softDown
-
-        // 下三角
-        let size: CGFloat = 8
-        var triangle = Path()
-        triangle.move(to: CGPoint(x: x, y: y + size))
-        triangle.addLine(to: CGPoint(x: x - size / 2, y: y))
-        triangle.addLine(to: CGPoint(x: x + size / 2, y: y))
-        triangle.closeSubpath()
-        context.fill(triangle, with: .color(color))
-
-        // "賣" 標籤
-        let text = Text("賣").font(.system(size: 9, weight: .bold, design: .rounded)).foregroundColor(color)
-        context.draw(context.resolve(text), at: CGPoint(x: x, y: max(y - 7, area.minY)), anchor: .center)
+    /// 三角形標記 view
+    private func markerTriangle(isBuy: Bool, color: Color) -> some View {
+        VStack(spacing: 1) {
+            if !isBuy {
+                Text("賣")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(color)
+            }
+            Image(systemName: isBuy ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                .font(.system(size: 8))
+                .foregroundStyle(color)
+            if isBuy {
+                Text("買")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(color)
+            }
+        }
     }
 
     // MARK: - Right-Side Annotation Badges
@@ -524,19 +644,26 @@ struct KLineChartView: View {
         context.stroke(path, with: .color(color), lineWidth: 1.5)
     }
 
-    private func drawMALegend(context: GraphicsContext, area: CGRect) {
+    private func drawMALegend(context: GraphicsContext, area: CGRect, showMA5: Bool, showMA20: Bool) {
         let y = area.minY + 2
-        let ma5Text = Text("MA5")
-            .font(.system(size: 8, weight: .medium, design: .rounded))
-            .foregroundColor(AppColor.softUp.opacity(0.8))
-        context.draw(context.resolve(ma5Text),
-                     at: CGPoint(x: area.minX + 2, y: y), anchor: .topLeading)
+        var offsetX = area.minX + 2
 
-        let ma20Text = Text("MA20")
-            .font(.system(size: 8, weight: .medium, design: .rounded))
-            .foregroundColor(AppColor.softDown.opacity(0.8))
-        context.draw(context.resolve(ma20Text),
-                     at: CGPoint(x: area.minX + 28, y: y), anchor: .topLeading)
+        if showMA5 {
+            let ma5Text = Text("MA5")
+                .font(.system(size: 8, weight: .medium, design: .rounded))
+                .foregroundColor(AppColor.softUp.opacity(0.8))
+            context.draw(context.resolve(ma5Text),
+                         at: CGPoint(x: offsetX, y: y), anchor: .topLeading)
+            offsetX += 26
+        }
+
+        if showMA20 {
+            let ma20Text = Text("MA20")
+                .font(.system(size: 8, weight: .medium, design: .rounded))
+                .foregroundColor(AppColor.softDown.opacity(0.8))
+            context.draw(context.resolve(ma20Text),
+                         at: CGPoint(x: offsetX, y: y), anchor: .topLeading)
+        }
     }
 
     // MARK: - Volume Bars Drawing
@@ -602,6 +729,55 @@ struct KLineChartView: View {
         )
     }
 
+    // MARK: - Crosshair Tooltip
+
+    private func crosshairTooltip(_ candle: CandleItem, index: Int) -> some View {
+        let isUp = candle.close >= candle.open
+        let color = isUp ? AppColor.softUp : AppColor.softDown
+
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                Text(candle.dateLabel)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(AppColor.textMain)
+
+                Group {
+                    miniLabel("開", value: formatPrice(candle.open))
+                    miniLabel("高", value: formatPrice(candle.high), color: AppColor.softUp)
+                    miniLabel("低", value: formatPrice(candle.low), color: AppColor.softDown)
+                    miniLabel("收", value: formatPrice(candle.close), color: color)
+                }
+
+                Spacer()
+
+                Text(formatVolume(candle.volume))
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            if vm.showMA5 || vm.showMA20 {
+                HStack(spacing: 12) {
+                    if vm.showMA5, let ma5Val = vm.ma5[safe: index] ?? nil {
+                        miniLabel("MA5", value: formatPrice(ma5Val),
+                                  color: AppColor.softUp.opacity(0.8))
+                    }
+                    if vm.showMA20, let ma20Val = vm.ma20[safe: index] ?? nil {
+                        miniLabel("MA20", value: formatPrice(ma20Val),
+                                  color: AppColor.softDown.opacity(0.8))
+                    }
+                    Spacer()
+                }
+            }
+        }
+        .font(.warmCaption2())
+        .padding(8)
+        .background(AppColor.primary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(AppColor.primary.opacity(0.2), lineWidth: 0.5)
+        )
+    }
+
     // MARK: - Tooltip
 
     private func tooltipView(_ candle: CandleItem) -> some View {
@@ -628,13 +804,13 @@ struct KLineChartView: View {
             }
 
             // MA 值（僅開啟時顯示）
-            if vm.showMA, let idx = vm.selectedCandleIndex {
+            if (vm.showMA5 || vm.showMA20), let idx = vm.selectedCandleIndex {
                 HStack(spacing: 12) {
-                    if let ma5Val = vm.ma5[safe: idx] ?? nil {
+                    if vm.showMA5, let ma5Val = vm.ma5[safe: idx] ?? nil {
                         miniLabel("MA5", value: formatPrice(ma5Val),
                                   color: AppColor.softUp.opacity(0.8))
                     }
-                    if let ma20Val = vm.ma20[safe: idx] ?? nil {
+                    if vm.showMA20, let ma20Val = vm.ma20[safe: idx] ?? nil {
                         miniLabel("MA20", value: formatPrice(ma20Val),
                                   color: AppColor.softDown.opacity(0.8))
                     }
