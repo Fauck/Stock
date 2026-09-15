@@ -939,6 +939,137 @@ enum TechnicalIndicators {
         let regime: MarketRegime
     }
 
+    // MARK: - 均線扣抵值
+
+    /// 均線扣抵方向預判
+    enum DeductionTrend: String, Sendable {
+        case up   = "趨升"
+        case down = "趨降"
+        case flat = "持平"
+    }
+
+    /// 單日扣抵值快照
+    struct DeductionPoint: Sendable {
+        let dayOffset: Int        // 0=今天, 1=明天, ...
+        let deductionPrice: Double
+        let trend: DeductionTrend
+    }
+
+    /// 單條均線的扣抵值分析
+    struct MADeductionInfo: Sendable, Identifiable {
+        let period: Int
+        let deductionPrice: Double   // N 日前即將被踢出的收盤價
+        let currentMA: Double
+        let currentPrice: Double
+        let trend: DeductionTrend
+        /// 扣抵價與現價的差距百分比（正=現價高於扣抵價→均線趨升）
+        let gapPercent: Double
+        /// 未來數日的扣抵值走勢（index 0 = 今天，1 = 明天 …）
+        let futureDeductions: [DeductionPoint]
+        /// 翻轉日（未來第幾天趨勢方向改變，nil = 期間內不翻轉）
+        let flipDay: Int?
+
+        var id: Int { period }
+        var periodLabel: String { "MA\(period)" }
+    }
+
+    /// 計算多條均線的扣抵值分析（含未來走勢）
+    /// - Parameters:
+    ///   - closes: 歷史收盤價陣列（由舊到新）
+    ///   - currentPrice: 最新收盤價
+    ///   - periods: 要分析的 MA 週期（預設 10/20/60）
+    ///   - forecastDays: 預測未來幾天的扣抵值（預設 5）
+    /// - Returns: 各週期的扣抵值資訊（資料不足的週期會被略過）
+    static func computeMADeductions(
+        closes: [Double],
+        currentPrice: Double,
+        periods: [Int] = [10, 20, 60],
+        forecastDays: Int = 5
+    ) -> [MADeductionInfo] {
+        var results: [MADeductionInfo] = []
+        let threshold: Double = 0.5  // ±0.5% 內視為持平
+
+        for period in periods {
+            guard closes.count >= period else { continue }
+
+            // 今天的扣抵值
+            let deductionPrice = closes[closes.count - period]
+
+            // 計算目前 MA
+            let recentCloses = Array(closes.suffix(period))
+            let currentMA = recentCloses.reduce(0, +) / Double(period)
+
+            // 差距百分比
+            let gap = currentPrice - deductionPrice
+            let gapPercent = deductionPrice > 0 ? (gap / deductionPrice) * 100 : 0
+
+            let trend: DeductionTrend
+            if gapPercent > threshold {
+                trend = .up
+            } else if gapPercent < -threshold {
+                trend = .down
+            } else {
+                trend = .flat
+            }
+
+            // 未來 N 日扣抵值走勢
+            var futurePoints: [DeductionPoint] = []
+            var flipDay: Int? = nil
+            let todayTrend = trend
+
+            for dayOffset in 0..<forecastDays {
+                let idx = closes.count - period + dayOffset
+                guard idx >= 0, idx < closes.count else { break }
+
+                let futureDeduction = closes[idx]
+                let futureGap = currentPrice - futureDeduction
+                let futureGapPct = futureDeduction > 0 ? (futureGap / futureDeduction) * 100 : 0
+
+                let futureTrend: DeductionTrend
+                if futureGapPct > threshold {
+                    futureTrend = .up
+                } else if futureGapPct < -threshold {
+                    futureTrend = .down
+                } else {
+                    futureTrend = .flat
+                }
+
+                futurePoints.append(DeductionPoint(
+                    dayOffset: dayOffset,
+                    deductionPrice: futureDeduction,
+                    trend: futureTrend
+                ))
+
+                // 偵測翻轉：從趨升變趨降、或從趨降變趨升
+                if flipDay == nil, dayOffset > 0 {
+                    let isFlip: Bool
+                    switch (todayTrend, futureTrend) {
+                    case (.up, .down), (.down, .up):
+                        isFlip = true
+                    case (.flat, .up), (.flat, .down):
+                        isFlip = true
+                    default:
+                        isFlip = false
+                    }
+                    if isFlip { flipDay = dayOffset }
+                }
+            }
+
+            results.append(MADeductionInfo(
+                period: period,
+                deductionPrice: deductionPrice,
+                currentMA: currentMA,
+                currentPrice: currentPrice,
+                trend: trend,
+                gapPercent: gapPercent,
+                futureDeductions: futurePoints,
+                flipDay: flipDay
+            ))
+        }
+
+        return results
+    }
+
     // MARK: - 市場狀態
 
     /// 市場狀態分類（基於 MA20 斜率與價格位置）

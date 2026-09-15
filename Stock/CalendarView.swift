@@ -21,7 +21,11 @@ struct CalendarView: View {
            sort: \Investment.buyDate, order: .reverse)
     private var closedInvestments: [Investment]
 
+    /// 交易日誌
+    @Query private var allJournals: [TradeJournal]
+
     @State private var vm = CalendarViewModel()
+    @State private var selectedJournalInvestment: Investment?
 
     var body: some View {
         NavigationStack {
@@ -32,6 +36,11 @@ struct CalendarView: View {
                     VStack(spacing: 16) {
                         // MARK: - 月份切換卡片
                         calendarCard
+
+                        // MARK: - 月度統計摘要
+                        if vm.hasTradesInMonth {
+                            monthSummaryCard
+                        }
 
                         // MARK: - 選擇日期的買入紀錄
                         selectedDateRecords
@@ -59,12 +68,23 @@ struct CalendarView: View {
             .onAppear {
                 vm.investments = investments
                 vm.closedInvestments = closedInvestments
+                vm.journals = allJournals
             }
             .onChange(of: investments) { _, newValue in
                 vm.investments = newValue
             }
             .onChange(of: closedInvestments) { _, newValue in
                 vm.closedInvestments = newValue
+            }
+            .onChange(of: allJournals) { _, newValue in
+                vm.journals = newValue
+            }
+            .sheet(item: $selectedJournalInvestment) { investment in
+                if let journal = vm.journal(for: investment.id) {
+                    NavigationStack {
+                        TradeJournalDetailView(investment: investment, journal: journal)
+                    }
+                }
             }
         }
     }
@@ -85,6 +105,65 @@ struct CalendarView: View {
         .padding(.horizontal)
         .cardStyle()
         .padding(.horizontal)
+    }
+
+    // MARK: - 月度統計摘要
+
+    private var monthSummaryCard: some View {
+        let s = vm.currentMonthSummary
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 4) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("本月交易摘要")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            // 第一行：買入 / 賣出 / 勝率
+            HStack(spacing: 0) {
+                summaryItem(label: "買入", value: "\(s.buyCount) 筆", color: AppColor.softUp)
+                summaryItem(label: "賣出", value: "\(s.sellCount) 筆", color: AppColor.softDown)
+                if s.sellCount > 0 {
+                    summaryItem(label: "勝率", value: String(format: "%.0f%%", s.winRate),
+                                color: s.winRate >= 50 ? AppColor.softUp : AppColor.softDown)
+                }
+            }
+
+            // 第二行：投入金額 / 已實現損益
+            HStack(spacing: 0) {
+                if s.totalInvested > 0 {
+                    summaryItem(label: "投入", value: formatAmount(s.totalInvested), color: AppColor.textMain)
+                }
+                if s.sellCount > 0 {
+                    summaryItem(label: "已實現",
+                                value: "\(s.realizedPnL >= 0 ? "+" : "")$\(formatAmount(abs(s.realizedPnL)))",
+                                color: Color.profitLossColor(s.realizedPnL))
+                }
+            }
+        }
+        .cardStyle()
+        .padding(.horizontal)
+    }
+
+    private func summaryItem(label: String, value: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text(label)
+                .font(.warmTertiary())
+                .foregroundStyle(AppColor.textSecondary)
+            Text(value)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(color)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func formatAmount(_ value: Double) -> String {
+        if value >= 10000 {
+            return String(format: "%.1f萬", value / 10000)
+        }
+        return String(format: "$%.0f", value)
     }
 
     // MARK: - 月份切換標頭
@@ -179,11 +258,11 @@ struct CalendarView: View {
             .frame(maxWidth: .infinity)
             .frame(height: 42)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous)
                     .fill(isSelected ? AppColor.primary : Color.clear)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous)
                     .stroke(isToday && !isSelected ? AppColor.primary.opacity(0.5) : Color.clear, lineWidth: 1.5)
             )
         }
@@ -272,55 +351,162 @@ struct CalendarView: View {
 
     // MARK: - 買入紀錄列
     private func buyRow(_ investment: Investment) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(StockMapping.displayName(for: investment.ticker))
-                    .font(.warmHeadline())
-                    .foregroundStyle(AppColor.textMain)
-                Text(String(format: "買入價：$%.2f", investment.buyPrice))
-                    .font(.warmCaption())
-                    .foregroundStyle(AppColor.textSecondary)
+        let journal = vm.journal(for: investment.id)
+        let hasJournal = journal != nil
+
+        return Button {
+            if hasJournal { selectedJournalInvestment = investment }
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(StockMapping.displayName(for: investment.ticker))
+                            .font(.warmHeadline())
+                            .foregroundStyle(AppColor.textMain)
+                        Text(String(format: "買入價：$%.2f", investment.buyPrice))
+                            .font(.warmCaption())
+                            .foregroundStyle(AppColor.textSecondary)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(String(format: "%.0f 股", investment.originalQuantity))
+                            .font(.warmSubheadline())
+                            .foregroundStyle(AppColor.primary)
+                        if let score = journal?.emotionScore {
+                            emotionBadge(score: score)
+                        }
+                    }
+                }
+
+                // 進場理由摘要
+                if let journal, !journal.setup.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "text.quote")
+                            .font(.system(size: 9))
+                            .foregroundStyle(AppColor.textSecondary)
+                        Text(journal.setup.prefix(30) + (journal.setup.count > 30 ? "..." : ""))
+                            .font(.system(size: 11, weight: .regular, design: .rounded))
+                            .foregroundStyle(AppColor.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                // 有日誌提示
+                if hasJournal {
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 9))
+                        Text("查看日誌")
+                            .font(.warmTertiary())
+                    }
+                    .foregroundStyle(AppColor.primary.opacity(0.7))
+                }
             }
-            Spacer()
-            Text(String(format: "%.0f 股", investment.originalQuantity))
-                .font(.warmSubheadline())
-                .foregroundStyle(AppColor.primary)
+            .padding(12)
+            .background(AppColor.background.opacity(0.6))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
         }
-        .padding(12)
-        .background(AppColor.background.opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .buttonStyle(.plain)
     }
 
     // MARK: - 賣出紀錄列
     private func sellRow(_ investment: Investment) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(StockMapping.displayName(for: investment.ticker))
-                    .font(.warmHeadline())
-                    .foregroundStyle(AppColor.textMain)
-                if let sp = investment.sellPrice {
-                    Text(String(format: "賣出價：$%.2f", sp))
-                        .font(.warmCaption())
-                        .foregroundStyle(AppColor.textSecondary)
+        let journal = vm.journal(for: investment.id)
+        let hasJournal = journal != nil
+
+        return Button {
+            if hasJournal { selectedJournalInvestment = investment }
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(StockMapping.displayName(for: investment.ticker))
+                            .font(.warmHeadline())
+                            .foregroundStyle(AppColor.textMain)
+                        if let sp = investment.sellPrice {
+                            Text(String(format: "賣出價：$%.2f", sp))
+                                .font(.warmCaption())
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 4) {
+                        if let sq = investment.sellQuantity {
+                            Text(String(format: "%.0f 股", sq))
+                                .font(.warmSubheadline())
+                                .foregroundStyle(AppColor.softDown)
+                        }
+                        let pl = investment.realizedProfitLoss()
+                        Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f")")
+                            .font(.warmCaption())
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Color.profitLossColor(pl))
+                    }
+                }
+
+                // R-Multiple + 出場理由
+                if let journal {
+                    HStack(spacing: 8) {
+                        if let r = journal.rMultiple {
+                            Text(String(format: "%+.2fR", r))
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(Color.rMultipleColor(r))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.rMultipleColor(r).opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                        if !journal.exitReason.isEmpty {
+                            Text(journal.exitReason.prefix(20) + (journal.exitReason.count > 20 ? "..." : ""))
+                                .font(.system(size: 11, weight: .regular, design: .rounded))
+                                .foregroundStyle(AppColor.textSecondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                    }
+                }
+
+                // 有日誌提示
+                if hasJournal {
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 9))
+                        Text("查看日誌")
+                            .font(.warmTertiary())
+                    }
+                    .foregroundStyle(AppColor.primary.opacity(0.7))
                 }
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 4) {
-                if let sq = investment.sellQuantity {
-                    Text(String(format: "%.0f 股", sq))
-                        .font(.warmSubheadline())
-                        .foregroundStyle(AppColor.softDown)
-                }
-                let pl = investment.realizedProfitLoss()
-                Text("\(pl >= 0 ? "+" : "")$\(pl, specifier: "%.0f")")
-                    .font(.warmCaption())
-                    .fontWeight(.semibold)
-                    .foregroundStyle(Color.profitLossColor(pl))
-            }
+            .padding(12)
+            .background(AppColor.background.opacity(0.6))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
         }
-        .padding(12)
-        .background(AppColor.background.opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 情緒分數 Badge
+
+    private func emotionBadge(score: Int) -> some View {
+        let emoji: String = switch score {
+        case 1: "😨"
+        case 2: "😟"
+        case 3: "😐"
+        case 4: "😊"
+        case 5: "🤑"
+        default: "😐"
+        }
+        let color: Color = switch score {
+        case 1, 2: AppColor.softDown
+        case 4, 5: AppColor.softUp
+        default: AppColor.textSecondary
+        }
+        return Text("\(emoji)\(score)")
+            .font(.warmTertiary())
+            .foregroundStyle(color)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12))
+            .clipShape(Capsule())
     }
 }
 

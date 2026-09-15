@@ -144,7 +144,7 @@ struct SellView: View {
                         .font(.warmBody())
                         .padding(10)
                         .background(AppColor.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -161,7 +161,7 @@ struct SellView: View {
                         .font(.warmBody())
                         .padding(10)
                         .background(AppColor.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                 }
             }
 
@@ -259,7 +259,7 @@ struct SellView: View {
                         }
                         .padding(10)
                         .background(AppColor.background.opacity(0.6))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                     }
 
                     // 出場理由選項
@@ -312,7 +312,7 @@ struct SellView: View {
                             .font(.warmBody())
                             .padding(10)
                             .background(AppColor.background)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
@@ -340,7 +340,7 @@ struct SellView: View {
                         }
                         .padding(10)
                         .background(Color.rMultipleColor(r).opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
 
                         if r < -1 {
                             HStack(spacing: 4) {

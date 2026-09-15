@@ -117,7 +117,7 @@ struct AddInvestmentView: View {
                     .font(.warmBody())
                     .padding(10)
                     .background(AppColor.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                     .onChange(of: vm.ticker) { _, _ in
                         vm.onTickerChanged()
                     }
@@ -180,7 +180,7 @@ struct AddInvestmentView: View {
                         .font(.warmBody())
                         .padding(10)
                         .background(AppColor.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                 }
 
                 // 買入數量
@@ -198,7 +198,7 @@ struct AddInvestmentView: View {
                         .font(.warmBody())
                         .padding(10)
                         .background(AppColor.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                 }
             }
         }
@@ -342,7 +342,7 @@ struct AddInvestmentView: View {
                             .font(.warmBody())
                             .padding(10)
                             .background(AppColor.background)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                     }
 
                     // 目標價 & 初始停損價
@@ -361,7 +361,7 @@ struct AddInvestmentView: View {
                                 .font(.warmBody())
                                 .padding(10)
                                 .background(AppColor.background)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                         }
 
                         VStack(alignment: .leading, spacing: 6) {
@@ -378,7 +378,7 @@ struct AddInvestmentView: View {
                                 .font(.warmBody())
                                 .padding(10)
                                 .background(AppColor.background)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                         }
                     }
 

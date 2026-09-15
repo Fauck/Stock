@@ -137,7 +137,7 @@ struct TransactionHistoryView: View {
                                     : AppColor.textMain
                             )
                             .clipShape(Capsule())
-                            .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+                            .rowShadow()
                     }
                 }
                 Spacer()
@@ -170,7 +170,7 @@ struct TransactionHistoryView: View {
                                         : AppColor.textMain
                                 )
                                 .clipShape(Capsule())
-                                .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+                                .rowShadow()
                         }
                     }
                 }
@@ -326,7 +326,7 @@ struct TransactionHistoryView: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(Color.profitLossColor(pl).opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous))
                 }
             } else if investment.quantity < investment.originalQuantity {
                 HStack(spacing: 6) {

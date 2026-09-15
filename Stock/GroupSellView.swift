@@ -156,7 +156,7 @@ struct GroupSellView: View {
                         .font(.warmBody())
                         .padding(10)
                         .background(AppColor.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -173,7 +173,7 @@ struct GroupSellView: View {
                         .font(.warmBody())
                         .padding(10)
                         .background(AppColor.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                 }
             }
 
@@ -298,7 +298,7 @@ struct GroupSellView: View {
                             .font(.warmBody())
                             .padding(10)
                             .background(AppColor.background)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
@@ -402,7 +402,7 @@ struct GroupSellView: View {
         }
         .padding(12)
         .background(AppColor.primary.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
     }
 }
 

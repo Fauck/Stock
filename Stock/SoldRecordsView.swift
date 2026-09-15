@@ -118,7 +118,7 @@ struct SoldRecordsView: View {
             }
         }
         .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+        .rowShadow()
     }
 
     // MARK: - 已實現損益內容
@@ -181,7 +181,7 @@ struct SoldRecordsView: View {
                                         : AppColor.textMain
                                 )
                                 .clipShape(Capsule())
-                                .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+                                .rowShadow()
                         }
                     }
                 }
@@ -214,7 +214,7 @@ struct SoldRecordsView: View {
         }
         .padding(.bottom, 8)
         .background(AppColor.cardBackground)
-        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+        .smallShadow()
     }
 
     // MARK: - 紀錄列表
@@ -393,10 +393,10 @@ struct SoldRecordsView: View {
     private func statCell(title: String, value: String, color: Color) -> some View {
         VStack(spacing: 3) {
             Text(title)
-                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .font(.warmMicro())
                 .foregroundStyle(AppColor.textSecondary)
             Text(value)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .font(.warmDataValue(.bold))
                 .foregroundStyle(color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -652,7 +652,7 @@ struct SoldRecordsView: View {
                     .foregroundStyle(AppColor.textSecondary)
                 Spacer()
                 Text("依損益排序")
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .font(.warmMicro())
                     .foregroundStyle(AppColor.textSecondary)
             }
 
@@ -661,11 +661,11 @@ struct SoldRecordsView: View {
                     // 標的名稱
                     VStack(alignment: .leading, spacing: 2) {
                         Text(summary.displayName)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .font(.warmDataValue(.semibold))
                             .foregroundStyle(AppColor.textMain)
                             .lineLimit(1)
                         Text("\(summary.tradeCount)筆 · 勝率\(String(format: "%.0f", summary.winRate))%")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .font(.warmMicro())
                             .foregroundStyle(AppColor.textSecondary)
                     }
                     .frame(minWidth: 80, alignment: .leading)
@@ -677,7 +677,7 @@ struct SoldRecordsView: View {
 
                     // 損益金額
                     Text(String(format: "%@$%.0f", summary.totalPL >= 0 ? "+" : "", summary.totalPL))
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .font(.warmDataValue(.bold))
                         .foregroundStyle(Color.profitLossColor(summary.totalPL))
                         .frame(minWidth: 70, alignment: .trailing)
                 }
@@ -843,7 +843,7 @@ struct SoldRecordsView: View {
                                         : AppColor.textMain
                                 )
                                 .clipShape(Capsule())
-                                .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+                                .rowShadow()
                         }
                     }
                 }

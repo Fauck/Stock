@@ -124,7 +124,7 @@ struct DataTransferView: View {
                 .padding(.vertical, 12)
                 .background(allInvestments.isEmpty ? AppColor.textSecondary : AppColor.primary)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+                .smallShadow()
             }
             .disabled(allInvestments.isEmpty)
         }
@@ -163,7 +163,7 @@ struct DataTransferView: View {
                 .padding(.vertical, 12)
                 .background(AppColor.secondary)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+                .smallShadow()
             }
         }
         .cardStyle()
@@ -192,7 +192,7 @@ struct DataTransferView: View {
         }
         .padding(14)
         .background(AppColor.background)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
     }
 
     private func infoRow(_ text: String) -> some View {

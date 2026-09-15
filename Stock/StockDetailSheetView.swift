@@ -19,6 +19,7 @@ struct StockDetailSheetView: View {
     let marginData: StockService.MarginTradingSummary?
     let sellRecommendation: TechnicalIndicators.SellRecommendation?
     let journalTarget: JournalTarget?
+    let maDeductions: [TechnicalIndicators.MADeductionInfo]
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -54,7 +55,8 @@ struct StockDetailSheetView: View {
         institutionalData: StockService.InstitutionalSummary? = nil,
         marginData: StockService.MarginTradingSummary? = nil,
         sellRecommendation: TechnicalIndicators.SellRecommendation? = nil,
-        journalTarget: JournalTarget? = nil
+        journalTarget: JournalTarget? = nil,
+        maDeductions: [TechnicalIndicators.MADeductionInfo] = []
     ) {
         self.group = group
         self.signal = signal
@@ -66,6 +68,7 @@ struct StockDetailSheetView: View {
         self.marginData = marginData
         self.sellRecommendation = sellRecommendation
         self.journalTarget = journalTarget
+        self.maDeductions = maDeductions
         self._chartVM = State(initialValue: KLineChartViewModel(group: group))
     }
 
@@ -106,14 +109,14 @@ struct StockDetailSheetView: View {
                                     Image(systemName: "target")
                                         .font(.system(size: 12))
                                     Text("設定目標 / 停損")
-                                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                                        .font(.warmDataValue())
                                 }
                                 .foregroundStyle(AppColor.primary)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 10)
                                 .frame(maxWidth: .infinity)
                                 .background(AppColor.primary.opacity(0.08))
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                             }
                             .buttonStyle(.plain)
                         }
@@ -131,6 +134,11 @@ struct StockDetailSheetView: View {
                         // 融資融券
                         if let margin = marginData {
                             marginTradingSection(margin)
+                        }
+
+                        // 均線扣抵值
+                        if !maDeductions.isEmpty {
+                            maDeductionSection
                         }
 
                         // K 線型態（僅供參考）
@@ -217,8 +225,8 @@ struct StockDetailSheetView: View {
         }
         .padding(12)
         .background(AppColor.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+        .cardShadow()
     }
 
     // MARK: - 技術指標信號
@@ -245,7 +253,7 @@ struct StockDetailSheetView: View {
                                 .foregroundStyle(item.color)
                                 .frame(width: 14)
                             Text(item.text)
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .font(.warmSecondaryData())
                                 .foregroundStyle(AppColor.textMain)
                         }
                     }
@@ -253,7 +261,7 @@ struct StockDetailSheetView: View {
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(AppColor.background.opacity(0.6))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous))
             }
 
             // 均線 & 交叉
@@ -354,15 +362,15 @@ struct StockDetailSheetView: View {
         }
         .padding(12)
         .background(AppColor.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+        .cardShadow()
     }
 
     /// 指標分類行
     private func signalRow<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 6) {
             Text(title)
-                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .font(.warmMicro())
                 .foregroundStyle(AppColor.textSecondary)
                 .frame(width: 32, alignment: .leading)
             content()
@@ -402,7 +410,7 @@ struct StockDetailSheetView: View {
                             .foregroundStyle(color)
                         Spacer()
                         Text("\(div.barsAgo) 日前起")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .font(.warmMicro())
                             .foregroundStyle(AppColor.textSecondary)
                     }
 
@@ -410,17 +418,17 @@ struct StockDetailSheetView: View {
                     HStack(spacing: 16) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("股價")
-                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                                .font(.warmMicro())
                                 .foregroundStyle(AppColor.textSecondary)
                             HStack(spacing: 4) {
                                 Text(String(format: "%.1f", div.pricePoint1))
-                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .font(.warmSecondaryData())
                                     .foregroundStyle(AppColor.textMain)
                                 Image(systemName: "arrow.right")
                                     .font(.system(size: 8))
                                     .foregroundStyle(AppColor.textSecondary)
                                 Text(String(format: "%.1f", div.pricePoint2))
-                                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                    .font(.warmSecondaryData(.semibold))
                                     .foregroundStyle(AppColor.textMain)
                                 let priceDir = div.pricePoint2 >= div.pricePoint1
                                 Image(systemName: priceDir ? "arrow.up" : "arrow.down")
@@ -431,13 +439,13 @@ struct StockDetailSheetView: View {
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(div.indicator)
-                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                                .font(.warmMicro())
                                 .foregroundStyle(AppColor.textSecondary)
                             HStack(spacing: 4) {
                                 Text(div.indicator == "RSI"
                                      ? String(format: "%.1f", div.indicatorPoint1)
                                      : String(format: "%.2f", div.indicatorPoint1))
-                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .font(.warmSecondaryData())
                                     .foregroundStyle(AppColor.textMain)
                                 Image(systemName: "arrow.right")
                                     .font(.system(size: 8))
@@ -445,7 +453,7 @@ struct StockDetailSheetView: View {
                                 Text(div.indicator == "RSI"
                                      ? String(format: "%.1f", div.indicatorPoint2)
                                      : String(format: "%.2f", div.indicatorPoint2))
-                                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                    .font(.warmSecondaryData(.semibold))
                                     .foregroundStyle(AppColor.textMain)
                                 let indDir = div.indicatorPoint2 >= div.indicatorPoint1
                                 Image(systemName: indDir ? "arrow.up" : "arrow.down")
@@ -457,19 +465,147 @@ struct StockDetailSheetView: View {
 
                     // 說明
                     Text(description)
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .font(.warmTertiary())
                         .foregroundStyle(AppColor.textSecondary)
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(color.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous))
             }
         }
         .padding(12)
         .background(AppColor.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+        .cardShadow()
+    }
+
+    // MARK: - 均線扣抵值卡片
+
+    private var maDeductionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.warmMicro(.semibold))
+                    .foregroundStyle(AppColor.primary)
+                Text("均線扣抵值")
+                    .font(.warmTertiary(.semibold))
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            // 表格
+            VStack(spacing: 6) {
+                // 表頭
+                HStack {
+                    Text("均線")
+                        .frame(width: 50, alignment: .leading)
+                    Text("扣抵價")
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    Text("現價")
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    Text("預判")
+                        .frame(width: 70, alignment: .trailing)
+                }
+                .font(.warmTertiary())
+                .foregroundStyle(AppColor.textSecondary)
+
+                AppColor.divider.frame(height: 0.5)
+
+                ForEach(maDeductions) { d in
+                    HStack {
+                        Text(d.periodLabel)
+                            .font(.warmSecondaryData(.semibold))
+                            .foregroundStyle(AppColor.textMain)
+                            .frame(width: 50, alignment: .leading)
+
+                        Text(formatDeductionPrice(d.deductionPrice))
+                            .font(.warmSecondaryData())
+                            .foregroundStyle(AppColor.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+
+                        Text(formatDeductionPrice(d.currentPrice))
+                            .font(.warmSecondaryData(.semibold))
+                            .foregroundStyle(AppColor.textMain)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+
+                        HStack(spacing: 3) {
+                            Image(systemName: deductionIcon(d.trend))
+                                .font(.system(size: 7))
+                            Text(d.trend.rawValue)
+                                .font(.warmSecondaryData(.semibold))
+                        }
+                        .foregroundStyle(deductionColor(d.trend))
+                        .frame(width: 70, alignment: .trailing)
+                    }
+                }
+            }
+
+            // 未來走勢圖
+            AppColor.divider.frame(height: 0.5)
+
+            ForEach(maDeductions) { d in
+                if d.futureDeductions.count >= 2 {
+                    DeductionForecastChart(info: d)
+                }
+            }
+
+            // 解讀
+            if let key = maDeductions.first(where: { $0.period == 20 }) ?? maDeductions.first {
+                AppColor.divider.frame(height: 0.5)
+                HStack(alignment: .top, spacing: 4) {
+                    Image(systemName: "lightbulb.min")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.orange)
+                        .padding(.top, 1)
+                    Text(deductionInterpretation(key))
+                        .font(.warmTertiary())
+                        .foregroundStyle(AppColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(AppSpacing.xl)
+        .background(AppColor.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        .cardShadow()
+    }
+
+    private func deductionIcon(_ trend: TechnicalIndicators.DeductionTrend) -> String {
+        switch trend {
+        case .up:   return "arrowtriangle.up.fill"
+        case .down: return "arrowtriangle.down.fill"
+        case .flat: return "minus"
+        }
+    }
+
+    private func deductionColor(_ trend: TechnicalIndicators.DeductionTrend) -> Color {
+        switch trend {
+        case .up:   return AppColor.softUp
+        case .down: return AppColor.softDown
+        case .flat: return AppColor.textSecondary
+        }
+    }
+
+    private func formatDeductionPrice(_ price: Double) -> String {
+        if price >= 100 {
+            return String(format: "%.0f", price)
+        } else if price >= 10 {
+            return String(format: "%.1f", price)
+        } else {
+            return String(format: "%.2f", price)
+        }
+    }
+
+    private func deductionInterpretation(_ d: TechnicalIndicators.MADeductionInfo) -> String {
+        let gap = String(format: "%.1f%%", abs(d.gapPercent))
+        switch d.trend {
+        case .up:
+            return "\(d.periodLabel) 扣抵價 \(formatDeductionPrice(d.deductionPrice)) 低於現價（差距 \(gap)），均線近期有上彎動能"
+        case .down:
+            return "\(d.periodLabel) 扣抵價 \(formatDeductionPrice(d.deductionPrice)) 高於現價（差距 \(gap)），均線近期有下彎壓力"
+        case .flat:
+            return "\(d.periodLabel) 扣抵價與現價接近，均線走勢持平"
+        }
     }
 
     // MARK: - K 線型態卡片
@@ -508,43 +644,43 @@ struct StockDetailSheetView: View {
                             .foregroundStyle(color)
                         Spacer()
                         Text("可靠度: \(pattern.reliability.rawValue)")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .font(.warmMicro())
                             .foregroundStyle(AppColor.textSecondary)
                     }
 
                     HStack(spacing: 12) {
                         HStack(spacing: 4) {
                             Text("方向")
-                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                                .font(.warmMicro())
                                 .foregroundStyle(AppColor.textSecondary)
                             Text(dirLabel)
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .font(.warmSecondaryData(.semibold))
                                 .foregroundStyle(color)
                         }
                         HStack(spacing: 4) {
                             Text("位置")
-                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                                .font(.warmMicro())
                                 .foregroundStyle(AppColor.textSecondary)
                             Text(pattern.barsAgo == 0 ? "最新" : "\(pattern.barsAgo) 日前")
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .font(.warmSecondaryData())
                                 .foregroundStyle(AppColor.textMain)
                         }
                     }
 
                     Text(pattern.description)
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .font(.warmTertiary())
                         .foregroundStyle(AppColor.textSecondary)
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(color.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous))
             }
         }
         .padding(12)
         .background(AppColor.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+        .cardShadow()
     }
 
     // MARK: - 賣出建議卡片
@@ -584,7 +720,7 @@ struct StockDetailSheetView: View {
                         .font(.system(size: 24, weight: .bold, design: .rounded))
                         .foregroundStyle(levelColor)
                     + Text(" / 100")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .font(.warmDataValue())
                         .foregroundStyle(AppColor.textSecondary)
                 }
 
@@ -606,7 +742,7 @@ struct StockDetailSheetView: View {
             }
             .padding(10)
             .background(levelColor.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous))
 
             // 因子列表
             if !rec.factors.isEmpty {
@@ -621,12 +757,12 @@ struct StockDetailSheetView: View {
                                 .font(.system(size: 7))
                                 .foregroundStyle(factor.isBearish ? AppColor.softDown : AppColor.softUp)
                             Text(factor.name)
-                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                                .font(.warmTertiary())
                                 .foregroundStyle(AppColor.textMain)
                                 .lineLimit(1)
                             Spacer(minLength: 2)
                             Text(factor.points > 0 ? "+\(factor.points)" : "\(factor.points)")
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .font(.warmTertiary(.semibold))
                                 .foregroundStyle(factor.isBearish ? AppColor.softDown : AppColor.softUp)
                         }
                     }
@@ -639,14 +775,14 @@ struct StockDetailSheetView: View {
                     .font(.system(size: 9))
                     .foregroundStyle(AppColor.textSecondary.opacity(0.6))
                 Text("此建議僅供參考，不構成投資建議")
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .font(.warmMicro())
                     .foregroundStyle(AppColor.textSecondary.opacity(0.6))
             }
         }
         .padding(12)
         .background(AppColor.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+        .cardShadow()
     }
 
     // MARK: - 操作建議信號
@@ -826,7 +962,7 @@ struct StockDetailSheetView: View {
             // 目前價格
             HStack {
                 Text("目前價格")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .font(.warmSecondaryData())
                     .foregroundStyle(AppColor.textSecondary)
                 Spacer()
                 Text(String(format: "%.2f", currentPrice))
@@ -851,7 +987,7 @@ struct StockDetailSheetView: View {
     private func srGroupView(title: String, levels: [SRLevel], currentPrice: Double, isResistance: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .font(.warmTertiary(.semibold))
                 .foregroundStyle(isResistance ? AppColor.softUp : AppColor.softDown)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
@@ -861,16 +997,16 @@ struct StockDetailSheetView: View {
             ForEach(levels) { level in
                 HStack(spacing: 0) {
                     Text(level.label)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .font(.warmSecondaryData())
                         .foregroundStyle(AppColor.textSecondary)
                         .frame(width: 70, alignment: .leading)
                     Spacer()
                     Text(String(format: "%.2f", level.price))
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .font(.warmDataValue(.semibold))
                         .foregroundStyle(isResistance ? AppColor.softUp : AppColor.softDown)
                     let pct = (level.price - currentPrice) / currentPrice * 100
                     Text(String(format: "%+.1f%%", pct))
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .font(.warmTertiary())
                         .foregroundStyle(AppColor.textSecondary)
                         .frame(width: 55, alignment: .trailing)
                 }
@@ -914,7 +1050,7 @@ struct StockDetailSheetView: View {
                         Image(systemName: "pencil")
                             .font(.system(size: 9))
                         Text("編輯")
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .font(.warmTertiary())
                     }
                     .foregroundStyle(AppColor.primary)
                     .padding(.horizontal, 8)
@@ -930,7 +1066,7 @@ struct StockDetailSheetView: View {
                 if let sl {
                     VStack(spacing: 2) {
                         Text("停損價")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .font(.warmMicro())
                             .foregroundStyle(AppColor.textSecondary)
                         Text(String(format: "$%.1f", sl))
                             .font(.warmCaption())
@@ -942,7 +1078,7 @@ struct StockDetailSheetView: View {
 
                 VStack(spacing: 2) {
                     Text("現價")
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .font(.warmMicro())
                         .foregroundStyle(AppColor.textSecondary)
                     Text(String(format: "$%.1f", currentPrice))
                         .font(.warmCaption())
@@ -954,7 +1090,7 @@ struct StockDetailSheetView: View {
                 if let tp {
                     VStack(spacing: 2) {
                         Text("目標價")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .font(.warmMicro())
                             .foregroundStyle(AppColor.textSecondary)
                         Text(String(format: "$%.1f", tp))
                             .font(.warmCaption())
@@ -966,7 +1102,7 @@ struct StockDetailSheetView: View {
 
                 VStack(spacing: 2) {
                     Text("均價")
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .font(.warmMicro())
                         .foregroundStyle(AppColor.textSecondary)
                     Text(String(format: "$%.1f", avgCost))
                         .font(.warmCaption())
@@ -1021,7 +1157,7 @@ struct StockDetailSheetView: View {
                 if let d = distToTarget {
                     VStack(spacing: 2) {
                         Text("距目標")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .font(.warmMicro())
                             .foregroundStyle(AppColor.textSecondary)
                         Text(String(format: "%@%.1f%%", d >= 0 ? "+" : "", d))
                             .font(.warmCaption())
@@ -1034,7 +1170,7 @@ struct StockDetailSheetView: View {
                 if let d = distToStop {
                     VStack(spacing: 2) {
                         Text("距停損")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .font(.warmMicro())
                             .foregroundStyle(AppColor.textSecondary)
                         Text(String(format: "%@%.1f%%", d >= 0 ? "+" : "", d))
                             .font(.warmCaption())
@@ -1047,7 +1183,7 @@ struct StockDetailSheetView: View {
                 if let rr = riskReward {
                     VStack(spacing: 2) {
                         Text("風險報酬比")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .font(.warmMicro())
                             .foregroundStyle(AppColor.textSecondary)
                         Text(String(format: "1:%.1f", rr))
                             .font(.warmCaption())
@@ -1060,8 +1196,8 @@ struct StockDetailSheetView: View {
         }
         .padding(12)
         .background(AppColor.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+        .cardShadow()
     }
 
     // MARK: - 移動停利建議
@@ -1094,7 +1230,7 @@ struct StockDetailSheetView: View {
             HStack(spacing: 0) {
                 VStack(spacing: 2) {
                     Text("最高價")
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .font(.warmMicro())
                         .foregroundStyle(AppColor.textSecondary)
                     Text(String(format: "$%.1f", high))
                         .font(.warmCaption())
@@ -1105,7 +1241,7 @@ struct StockDetailSheetView: View {
 
                 VStack(spacing: 2) {
                     Text("停利線")
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .font(.warmMicro())
                         .foregroundStyle(AppColor.textSecondary)
                     Text(String(format: "$%.1f", stopPrice))
                         .font(.warmCaption())
@@ -1116,7 +1252,7 @@ struct StockDetailSheetView: View {
 
                 VStack(spacing: 2) {
                     Text("現價")
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .font(.warmMicro())
                         .foregroundStyle(AppColor.textSecondary)
                     Text(String(format: "$%.1f", currentPrice))
                         .font(.warmCaption())
@@ -1127,7 +1263,7 @@ struct StockDetailSheetView: View {
 
                 VStack(spacing: 2) {
                     Text("回撤")
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .font(.warmMicro())
                         .foregroundStyle(AppColor.textSecondary)
                     Text(String(format: "↓%.1f%%", drawdownPct))
                         .font(.warmCaption())
@@ -1144,35 +1280,35 @@ struct StockDetailSheetView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(AppColor.softDown)
                     Text(String(format: "現價已跌破停利線，建議停利出場"))
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .font(.warmSecondaryData())
                         .foregroundStyle(AppColor.textMain)
                 } else if nearStop {
                     Image(systemName: "exclamationmark.circle.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(.orange)
                     Text(String(format: "接近停利線（距 %.1f%%），密切留意", marginPct))
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .font(.warmSecondaryData())
                         .foregroundStyle(AppColor.textMain)
                 } else {
                     Image(systemName: "checkmark.shield")
                         .font(.system(size: 11))
                         .foregroundStyle(AppColor.secondary)
                     Text(String(format: "安全持有中，距停利線 %.1f%%", marginPct))
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .font(.warmSecondaryData())
                         .foregroundStyle(AppColor.textMain)
                 }
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous)
                     .fill(statusColor.opacity(0.10))
             )
         }
         .padding(12)
         .background(AppColor.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+        .cardShadow()
     }
 
     // MARK: - 法人買賣超
@@ -1221,7 +1357,7 @@ struct StockDetailSheetView: View {
                     Text("合計")
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .font(.warmMicro(.semibold))
                 .foregroundStyle(AppColor.textSecondary)
                 .padding(.vertical, 4)
 
@@ -1242,7 +1378,7 @@ struct StockDetailSheetView: View {
                         netText(day.totalNet)
                             .frame(maxWidth: .infinity, alignment: .trailing)
                     }
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .font(.warmMicro())
                     .padding(.vertical, 3)
                 }
             }
@@ -1252,18 +1388,18 @@ struct StockDetailSheetView: View {
         }
         .padding(12)
         .background(AppColor.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+        .cardShadow()
     }
 
     private func streakBadge(label: String, streak: Int) -> some View {
         HStack(spacing: 3) {
             Text(label)
-                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .font(.warmMicro())
                 .foregroundStyle(AppColor.textSecondary)
             if abs(streak) >= 2 {
                 Text("連\(streak > 0 ? "買" : "賣")\(abs(streak))日")
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .font(.warmMicro(.semibold))
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
                     .background((streak > 0 ? AppColor.softUp : AppColor.softDown).opacity(0.15))
@@ -1271,11 +1407,11 @@ struct StockDetailSheetView: View {
                     .clipShape(Capsule())
             } else if streak != 0 {
                 Text(streak > 0 ? "買超" : "賣超")
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .font(.warmMicro())
                     .foregroundStyle(streak > 0 ? AppColor.softUp : AppColor.softDown)
             } else {
                 Text("—")
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .font(.warmMicro())
                     .foregroundStyle(AppColor.textSecondary.opacity(0.5))
             }
         }
@@ -1285,7 +1421,7 @@ struct StockDetailSheetView: View {
     private func cumulativeLabel(_ label: String, value: Int) -> some View {
         HStack(spacing: 2) {
             Text(label)
-                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .font(.warmMicro())
                 .foregroundStyle(AppColor.textSecondary)
             Text("\(value > 0 ? "+" : "")\(value)")
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
@@ -1397,15 +1533,15 @@ struct StockDetailSheetView: View {
         }
         .padding(12)
         .background(AppColor.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+        .cardShadow()
     }
 
     /// 融資融券餘額標籤
     private func marginBalanceLabel(_ label: String, value: Int) -> some View {
         HStack(spacing: 2) {
             Text(label)
-                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .font(.warmMicro())
                 .foregroundStyle(AppColor.textSecondary)
             Text(formatCompact(value))
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
@@ -1421,7 +1557,7 @@ struct StockDetailSheetView: View {
     private func marginBalanceLabel(_ label: String, text: String) -> some View {
         HStack(spacing: 2) {
             Text(label)
-                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .font(.warmMicro())
                 .foregroundStyle(AppColor.textSecondary)
             Text(text)
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
@@ -1444,7 +1580,7 @@ struct StockDetailSheetView: View {
                 let isBullish = (label == "融資" && !isIncrease) || (label == "融券" && isIncrease)
                 let color: Color = isBullish ? AppColor.softUp : AppColor.softDown
                 Text(text)
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .font(.warmMicro(.semibold))
                     .foregroundStyle(color)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
@@ -1452,7 +1588,7 @@ struct StockDetailSheetView: View {
                     .clipShape(Capsule())
             } else {
                 Text("—")
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .font(.warmMicro())
                     .foregroundStyle(AppColor.textSecondary.opacity(0.5))
             }
         }
@@ -1513,8 +1649,8 @@ struct StockDetailSheetView: View {
         }
         .padding(12)
         .background(AppColor.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+        .cardShadow()
     }
 
     // MARK: - Helpers
@@ -1535,15 +1671,15 @@ struct StockDetailSheetView: View {
         return VStack(spacing: 4) {
             HStack {
                 Text(String(format: "低 $%.1f", low))
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .font(.warmMicro())
                     .foregroundStyle(AppColor.textSecondary)
                 Spacer()
                 Text(String(format: "%@ $%.2f (%d%%)", label, value, Int(percentile * 100)))
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .font(.warmMicro(.semibold))
                     .foregroundStyle(barColor)
                 Spacer()
                 Text(String(format: "$%.1f 高", high))
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .font(.warmMicro())
                     .foregroundStyle(AppColor.textSecondary)
             }
 
@@ -1573,7 +1709,7 @@ struct StockDetailSheetView: View {
 
     private func signalPill(_ text: String, color: Color, filled: Bool = false) -> some View {
         Text(text)
-            .font(.system(size: 9, weight: .medium, design: .rounded))
+            .font(.warmMicro())
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(filled ? color : color.opacity(0.12))
@@ -1627,7 +1763,7 @@ private struct TargetStopEditSheetInDetail: View {
                             .font(.warmBody())
                             .padding(10)
                             .background(AppColor.background)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                     }
                     .cardStyle()
 
@@ -1645,7 +1781,7 @@ private struct TargetStopEditSheetInDetail: View {
                             .font(.warmBody())
                             .padding(10)
                             .background(AppColor.background)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                     }
                     .cardStyle()
 
@@ -1661,7 +1797,7 @@ private struct TargetStopEditSheetInDetail: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .background(AppColor.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
                     }
                 }
                 .padding(16)

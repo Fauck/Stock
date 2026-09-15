@@ -771,9 +771,9 @@ struct KLineChartView: View {
         .font(.warmCaption2())
         .padding(8)
         .background(AppColor.primary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous)
                 .strokeBorder(AppColor.primary.opacity(0.2), lineWidth: 0.5)
         )
     }
@@ -821,7 +821,7 @@ struct KLineChartView: View {
         .font(.warmCaption2())
         .padding(8)
         .background(AppColor.background.opacity(0.8))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous))
     }
 
     private func miniLabel(_ title: String, value: String, color: Color = AppColor.textMain) -> some View {

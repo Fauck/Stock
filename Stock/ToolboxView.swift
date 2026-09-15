@@ -16,13 +16,13 @@ struct ToolboxView: View {
 
                 ScrollView {
                     VStack(spacing: 12) {
-//                        toolCard(
-//                            title: "盤中分析",
-//                            subtitle: "當日分價量表、成交明細與大單追蹤",
-//                            icon: "waveform.path.ecg",
-//                            iconColor: AppColor.secondary,
-//                            destination: IntradayAnalysisView()
-//                        )
+                        toolCard(
+                            title: "交易績效儀表板",
+                            subtitle: "勝率趨勢、情緒分析、R值紀律與標的排行",
+                            icon: "chart.xyaxis.line",
+                            iconColor: AppColor.primary,
+                            destination: DashboardView()
+                        )
 
                         toolCard(
                             title: "交易日誌",
@@ -90,7 +90,7 @@ struct ToolboxView: View {
                     .foregroundStyle(iconColor)
                     .frame(width: 40, height: 40)
                     .background(iconColor.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)

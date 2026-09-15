@@ -80,8 +80,8 @@ struct IntradayAnalysisView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(AppColor.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
+            .smallShadow()
 
             Button {
                 vm.load()
@@ -255,7 +255,7 @@ struct IntradayAnalysisView: View {
                 Text("佔比")
                     .frame(width: 40, alignment: .trailing)
             }
-            .font(.system(size: 9, weight: .medium, design: .rounded))
+            .font(.warmMicro())
             .foregroundStyle(AppColor.textSecondary)
 
             // 資料列
@@ -266,7 +266,7 @@ struct IntradayAnalysisView: View {
         .padding(12)
         .background(AppColor.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
+        .mediumShadow()
     }
 
     private func volumeBar(_ row: IntradayAnalysisViewModel.VolumeRow) -> some View {
@@ -331,7 +331,7 @@ struct IntradayAnalysisView: View {
                     .frame(width: 60, alignment: .trailing)
                 Spacer()
             }
-            .font(.system(size: 9, weight: .medium, design: .rounded))
+            .font(.warmMicro())
             .foregroundStyle(AppColor.textSecondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -350,7 +350,7 @@ struct IntradayAnalysisView: View {
         }
         .background(AppColor.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
+        .mediumShadow()
     }
 
     private func tradeRow(_ row: IntradayAnalysisViewModel.TradeRow, previousPrice: Double?) -> some View {
@@ -467,7 +467,7 @@ struct IntradayAnalysisView: View {
                         Text("量(張)")
                             .frame(width: 50, alignment: .trailing)
                     }
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .font(.warmMicro())
                     .foregroundStyle(AppColor.textSecondary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
@@ -506,13 +506,13 @@ struct IntradayAnalysisView: View {
                     }
                 }
                 .background(AppColor.cardBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
             }
         }
         .padding(12)
         .background(AppColor.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
+        .mediumShadow()
     }
 
     // MARK: - 狀態視圖

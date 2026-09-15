@@ -31,6 +31,9 @@ final class PortfolioListViewModel {
     /// 最近 7 個交易日收盤價 [ticker: [Double]]（Sparkline 用）
     var sparklineData: [String: [Double]] = [:]
 
+    /// 均線扣抵值分析 [ticker: [MADeductionInfo]]
+    var maDeductions: [String: [TechnicalIndicators.MADeductionInfo]] = [:]
+
     /// 三大法人買賣超 [ticker: InstitutionalSummary]
     var institutionalData: [String: StockService.InstitutionalSummary] = [:]
     var isFetchingInstitutional: Bool = false
@@ -494,6 +497,14 @@ final class PortfolioListViewModel {
             // Sparkline：取最近 7 個交易日收盤價
             let closes = candle.closes
             sparklineData[ticker] = Array(closes.suffix(7))
+
+            // 均線扣抵值
+            if let price = currentPrice(for: ticker) {
+                maDeductions[ticker] = TechnicalIndicators.computeMADeductions(
+                    closes: closes,
+                    currentPrice: price
+                )
+            }
         }
     }
 

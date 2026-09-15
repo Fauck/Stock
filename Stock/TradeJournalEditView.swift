@@ -222,7 +222,7 @@ struct TradeJournalEditView: View {
                     .font(.warmBody())
                     .padding(10)
                     .background(AppColor.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
             }
 
             // 目標價 & 初始停損價
@@ -241,7 +241,7 @@ struct TradeJournalEditView: View {
                         .font(.warmBody())
                         .padding(10)
                         .background(AppColor.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -258,7 +258,7 @@ struct TradeJournalEditView: View {
                         .font(.warmBody())
                         .padding(10)
                         .background(AppColor.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
                 }
             }
         }
@@ -357,7 +357,7 @@ struct TradeJournalEditView: View {
                 }
                 .padding(10)
                 .background(Color.rMultipleColor(r).opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
             }
 
             // 反思筆記

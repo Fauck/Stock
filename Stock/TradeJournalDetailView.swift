@@ -142,7 +142,7 @@ struct TradeJournalDetailView: View {
                     .foregroundStyle(abs(pct) > 1 ? AppColor.softDown : AppColor.textSecondary)
                     .padding(8)
                     .background(AppColor.background.opacity(0.6))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous))
                 }
             }
 
@@ -252,7 +252,7 @@ struct TradeJournalDetailView: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(Color.profitLossColor(pl).opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous))
                     Spacer()
                     let pct = investment.realizedReturnPercentage()
                     WarmInfoBadge(
@@ -308,7 +308,7 @@ struct TradeJournalDetailView: View {
                         .foregroundStyle(AppColor.textMain)
                         .padding(10)
                         .background(AppColor.background.opacity(0.6))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous))
                 }
             }
         }
@@ -375,7 +375,7 @@ struct TradeJournalDetailView: View {
                 .foregroundStyle(AppColor.softDown)
                 .padding(8)
                 .background(AppColor.softDown.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous))
             }
         }
         .padding(12)

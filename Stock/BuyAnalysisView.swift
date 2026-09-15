@@ -93,7 +93,7 @@ struct BuyAnalysisView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(AppColor.divider.opacity(0.4))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous))
 
             Button {
                 performSearch()
@@ -104,7 +104,7 @@ struct BuyAnalysisView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .background(AppColor.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous))
             }
             .disabled(vm.searchText.trimmingCharacters(in: .whitespaces).isEmpty || vm.isLoading)
         }
@@ -157,6 +157,17 @@ struct BuyAnalysisView: View {
                     }
                 }
 
+                if !vm.maDeductions.isEmpty {
+                    collapsibleCard(
+                        id: "deduction",
+                        icon: "arrow.left.arrow.right",
+                        title: "均線扣抵值",
+                        summary: deductionSummaryText()
+                    ) {
+                        deductionContent
+                    }
+                }
+
                 if vm.week52High != nil || vm.week52Low != nil {
                     collapsibleCard(
                         id: "week52",
@@ -174,7 +185,7 @@ struct BuyAnalysisView: View {
                         .font(.system(size: 9))
                         .foregroundStyle(AppColor.textSecondary.opacity(0.6))
                     Text("此分析僅供參考，不構成投資建議")
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .font(.warmMicro())
                         .foregroundStyle(AppColor.textSecondary.opacity(0.6))
                 }
                 .padding(.bottom, 20)
@@ -217,7 +228,7 @@ struct BuyAnalysisView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             } else {
                 Text(summary)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .font(.warmSecondaryData())
                     .foregroundStyle(AppColor.textSecondary)
                     .lineLimit(1)
                     .transition(.opacity)
@@ -350,7 +361,7 @@ struct BuyAnalysisView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
             .background(levelColor.opacity(0.06))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
         }
         .cardStyle()
     }
@@ -394,11 +405,11 @@ struct BuyAnalysisView: View {
 
                         HStack {
                             Text("偏多 +\(bullishTotal)")
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .font(.warmTertiary(.semibold))
                                 .foregroundStyle(AppColor.softUp)
                             Spacer()
                             Text("偏空 -\(bearishTotal)")
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .font(.warmTertiary(.semibold))
                                 .foregroundStyle(AppColor.softDown)
                         }
                     }
@@ -417,12 +428,12 @@ struct BuyAnalysisView: View {
                                 .font(.system(size: 7))
                                 .foregroundStyle(factor.isBullish ? AppColor.softUp : AppColor.softDown)
                             Text(factor.name)
-                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                                .font(.warmTertiary())
                                 .foregroundStyle(AppColor.textMain)
                                 .lineLimit(1)
                             Spacer(minLength: 2)
                             Text(factor.points > 0 ? "+\(factor.points)" : "\(factor.points)")
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .font(.warmTertiary(.semibold))
                                 .foregroundStyle(factor.isBullish ? AppColor.softUp : AppColor.softDown)
                         }
                     }
@@ -439,11 +450,11 @@ struct BuyAnalysisView: View {
         return ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
             HStack {
                 Text(row.0)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .font(.warmSecondaryData())
                     .foregroundStyle(AppColor.textSecondary)
                 Spacer()
                 Text(row.1)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(.warmSecondaryData(.semibold))
                     .foregroundStyle(row.2)
             }
         }
@@ -466,11 +477,11 @@ struct BuyAnalysisView: View {
                 Spacer()
                 if p.barsAgo == 0 {
                     Text("今日")
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .font(.warmMicro())
                         .foregroundStyle(AppColor.softUp)
                 } else {
                     Text("\(p.barsAgo)日前")
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .font(.warmMicro())
                         .foregroundStyle(AppColor.textSecondary)
                 }
             }
@@ -540,7 +551,7 @@ struct BuyAnalysisView: View {
 
                 HStack {
                     Text(formatPrice(low))
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .font(.warmTertiary())
                         .foregroundStyle(AppColor.softDown)
                     Spacer()
                     Text(String(format: "%.0f%%", clampedPos * 100))
@@ -548,10 +559,118 @@ struct BuyAnalysisView: View {
                         .foregroundStyle(AppColor.textSecondary)
                     Spacer()
                     Text(formatPrice(high))
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .font(.warmTertiary())
                         .foregroundStyle(AppColor.softUp)
                 }
             }
+        }
+    }
+
+    // MARK: - Deduction Summary & Content
+
+    private func deductionSummaryText() -> String {
+        let parts = vm.maDeductions.map { d in
+            let arrow: String
+            switch d.trend {
+            case .up:   arrow = "↑"
+            case .down: arrow = "↓"
+            case .flat: arrow = "→"
+            }
+            return "\(d.periodLabel)\(arrow)"
+        }
+        return parts.joined(separator: "｜")
+    }
+
+    private var deductionContent: some View {
+        VStack(spacing: 6) {
+            // 表頭
+            HStack {
+                Text("均線")
+                    .frame(width: 50, alignment: .leading)
+                Text("扣抵價")
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                Text("現價")
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                Text("預判")
+                    .frame(width: 70, alignment: .trailing)
+            }
+            .font(.warmTertiary())
+            .foregroundStyle(AppColor.textSecondary)
+
+            Divider().foregroundStyle(AppColor.divider)
+
+            // 各均線資料列
+            ForEach(vm.maDeductions) { d in
+                HStack {
+                    Text(d.periodLabel)
+                        .font(.warmSecondaryData(.semibold))
+                        .foregroundStyle(AppColor.textMain)
+                        .frame(width: 50, alignment: .leading)
+
+                    Text(formatPrice(d.deductionPrice))
+                        .font(.warmSecondaryData())
+                        .foregroundStyle(AppColor.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+
+                    Text(formatPrice(d.currentPrice))
+                        .font(.warmSecondaryData(.semibold))
+                        .foregroundStyle(AppColor.textMain)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+
+                    HStack(spacing: 3) {
+                        Image(systemName: d.trend == .up ? "arrowtriangle.up.fill" : (d.trend == .down ? "arrowtriangle.down.fill" : "minus"))
+                            .font(.system(size: 7))
+                        Text(d.trend.rawValue)
+                            .font(.warmSecondaryData(.semibold))
+                    }
+                    .foregroundStyle(deductionTrendColor(d.trend))
+                    .frame(width: 70, alignment: .trailing)
+                }
+            }
+
+            // 未來走勢圖
+            Divider().foregroundStyle(AppColor.divider)
+
+            ForEach(vm.maDeductions) { d in
+                if d.futureDeductions.count >= 2 {
+                    DeductionForecastChart(info: d)
+                }
+            }
+
+            // 解讀說明
+            if let key = vm.maDeductions.first(where: { $0.period == 20 }) ?? vm.maDeductions.first {
+                Divider().foregroundStyle(AppColor.divider)
+                HStack(alignment: .top, spacing: 4) {
+                    Image(systemName: "lightbulb.min")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.orange)
+                        .padding(.top, 1)
+                    Text(deductionInterpretation(key))
+                        .font(.warmTertiary())
+                        .foregroundStyle(AppColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func deductionTrendColor(_ trend: TechnicalIndicators.DeductionTrend) -> Color {
+        switch trend {
+        case .up:   return AppColor.softUp
+        case .down: return AppColor.softDown
+        case .flat: return AppColor.textSecondary
+        }
+    }
+
+    private func deductionInterpretation(_ d: TechnicalIndicators.MADeductionInfo) -> String {
+        let gap = String(format: "%.1f%%", abs(d.gapPercent))
+        switch d.trend {
+        case .up:
+            return "\(d.periodLabel) 扣抵價 \(formatPrice(d.deductionPrice)) 低於現價（差距 \(gap)），均線近期有上彎動能"
+        case .down:
+            return "\(d.periodLabel) 扣抵價 \(formatPrice(d.deductionPrice)) 高於現價（差距 \(gap)），均線近期有下彎壓力"
+        case .flat:
+            return "\(d.periodLabel) 扣抵價與現價接近，均線走勢持平"
         }
     }
 
@@ -581,7 +700,7 @@ struct BuyAnalysisView: View {
             }
         }()
         return Text(text)
-            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .font(.warmMicro(.bold))
             .foregroundStyle(color)
             .frame(width: 22, height: 22)
             .background(color.opacity(0.12))
@@ -591,7 +710,7 @@ struct BuyAnalysisView: View {
     private func institutionalColumn(title: String, streak: Int, latestNet: Int) -> some View {
         VStack(spacing: 4) {
             Text(title)
-                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .font(.warmTertiary())
                 .foregroundStyle(AppColor.textSecondary)
             Text(latestNet >= 0 ? "+\(latestNet)" : "\(latestNet)")
                 .font(.system(size: 13, weight: .bold, design: .rounded))
@@ -599,7 +718,7 @@ struct BuyAnalysisView: View {
             if abs(streak) >= 2 {
                 let label = streak > 0 ? "連買\(streak)日" : "連賣\(abs(streak))日"
                 Text(label)
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .font(.warmMicro())
                     .foregroundStyle(streak > 0 ? AppColor.softUp : AppColor.softDown)
             }
         }
@@ -697,7 +816,7 @@ private struct ScoreGaugeView: View {
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundStyle(levelColor)
                     Text("/ 100")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .font(.warmSecondaryData())
                         .foregroundStyle(AppColor.textSecondary)
                 }
                 .offset(y: radius * 0.15)

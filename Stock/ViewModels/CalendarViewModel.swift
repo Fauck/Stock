@@ -16,6 +16,7 @@ final class CalendarViewModel {
     // MARK: - Data (bridged from @Query)
     var investments: [Investment] = []
     var closedInvestments: [Investment] = []
+    var journals: [TradeJournal] = []
 
     // MARK: - Calendar Navigation
 
@@ -67,6 +68,61 @@ final class CalendarViewModel {
             guard let sellDate = inv.sellDate else { return false }
             return calendar.isDate(sellDate, inSameDayAs: date)
         }
+    }
+
+    // MARK: - 月度統計
+
+    struct MonthSummary {
+        let buyCount: Int
+        let sellCount: Int
+        let totalInvested: Double
+        let realizedPnL: Double
+        let winCount: Int
+        let winRate: Double
+    }
+
+    var currentMonthSummary: MonthSummary {
+        let comps = calendar.dateComponents([.year, .month], from: currentMonth)
+        guard let firstDay = calendar.date(from: comps),
+              let nextMonth = calendar.date(byAdding: .month, value: 1, to: firstDay)
+        else {
+            return MonthSummary(buyCount: 0, sellCount: 0, totalInvested: 0, realizedPnL: 0, winCount: 0, winRate: 0)
+        }
+
+        // 當月買入
+        let buys = investments.filter { $0.buyDate >= firstDay && $0.buyDate < nextMonth }
+        let buyCount = buys.count
+        let totalInvested = buys.reduce(0.0) { $0 + $1.buyPrice * $1.originalQuantity }
+
+        // 當月賣出
+        let sells = closedInvestments.filter { inv in
+            guard let sellDate = inv.sellDate else { return false }
+            return sellDate >= firstDay && sellDate < nextMonth
+        }
+        let sellCount = sells.count
+        let fees = TradingFeeSettings.load()
+        let realizedPnL = sells.reduce(0.0) { $0 + $1.realizedProfitLoss(fees: fees) }
+        let winCount = sells.filter { $0.realizedProfitLoss(fees: fees) > 0 }.count
+        let winRate = sellCount > 0 ? Double(winCount) / Double(sellCount) * 100 : 0
+
+        return MonthSummary(
+            buyCount: buyCount, sellCount: sellCount,
+            totalInvested: totalInvested, realizedPnL: realizedPnL,
+            winCount: winCount, winRate: winRate
+        )
+    }
+
+    /// 該月是否有任何交易
+    var hasTradesInMonth: Bool {
+        let s = currentMonthSummary
+        return s.buyCount > 0 || s.sellCount > 0
+    }
+
+    // MARK: - Journal 查詢
+
+    /// 查詢 Investment 對應的 TradeJournal
+    func journal(for investmentID: UUID) -> TradeJournal? {
+        journals.first { $0.investmentID == investmentID }
     }
 
     // MARK: - Date Comparison Helpers

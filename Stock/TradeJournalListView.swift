@@ -139,7 +139,7 @@ struct TradeJournalListView: View {
                                     : AppColor.textMain
                             )
                             .clipShape(Capsule())
-                            .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+                            .rowShadow()
                     }
                 }
                 Spacer()
@@ -172,7 +172,7 @@ struct TradeJournalListView: View {
                                         : AppColor.textMain
                                 )
                                 .clipShape(Capsule())
-                                .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+                                .rowShadow()
                         }
                     }
                 }
@@ -431,7 +431,7 @@ struct TradeJournalListView: View {
                 }
                 .padding(10)
                 .background(Color.rMultipleColor(r).opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
             } else if !investment.isClosed {
                 // 未平倉：無 R 值
                 HStack(spacing: 6) {
@@ -503,7 +503,7 @@ struct TradeJournalListView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(color.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous))
     }
 
     private func emotionDots(score: Int) -> some View {

@@ -31,6 +31,34 @@ enum AppColor {
     static let divider = Color(red: 0.88, green: 0.86, blue: 0.82)
 }
 
+// MARK: - 間距代幣
+
+/// 統一的間距系統，基於 4pt 倍數
+enum AppSpacing {
+    static let xxs: CGFloat = 2
+    static let xs:  CGFloat = 4
+    static let s:   CGFloat = 6
+    static let m:   CGFloat = 8
+    static let l:   CGFloat = 10
+    static let ml:  CGFloat = 12
+    static let lg:  CGFloat = 14
+    static let xl:  CGFloat = 16
+}
+
+// MARK: - 圓角代幣
+
+/// 統一的圓角半徑系統
+enum AppRadius {
+    static let micro: CGFloat = 2    // progress bars, chart bars
+    static let tiny:  CGFloat = 3    // win-rate mini bars
+    static let tag:   CGFloat = 4    // chart element labels
+    static let pill:  CGFloat = 8    // filter chips, stop-loss pills
+    static let inner: CGFloat = 10   // metric cells, detail rows
+    static let field: CGFloat = 12   // form fields, banners, day cells
+    static let panel: CGFloat = 16   // sheet panels
+    static let card:  CGFloat = 20   // outer cards
+}
+
 // MARK: - 字體擴展
 
 extension Font {
@@ -68,6 +96,26 @@ extension Font {
     static func warmLargeNumber() -> Font {
         .system(.title, design: .rounded, weight: .bold)
     }
+
+    /// 圓體微型（9pt）— chart labels, sub-labels
+    static func warmMicro(_ weight: Font.Weight = .medium) -> Font {
+        .system(size: 9, weight: weight, design: .rounded)
+    }
+
+    /// 圓體三級標籤（10pt）— pills, section headers
+    static func warmTertiary(_ weight: Font.Weight = .medium) -> Font {
+        .system(size: 10, weight: weight, design: .rounded)
+    }
+
+    /// 圓體次要資料（11pt）— qty, avg cost, metadata
+    static func warmSecondaryData(_ weight: Font.Weight = .medium) -> Font {
+        .system(size: 11, weight: weight, design: .rounded)
+    }
+
+    /// 圓體資料值（12pt）— metric values, inputs
+    static func warmDataValue(_ weight: Font.Weight = .medium) -> Font {
+        .system(size: 12, weight: weight, design: .rounded)
+    }
 }
 
 // MARK: - 卡片樣式修飾器
@@ -76,16 +124,40 @@ extension Font {
 struct CardStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .padding(16)
+            .padding(AppSpacing.xl)
             .background(AppColor.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+            .cardShadow()
     }
 }
 
 extension View {
     func cardStyle() -> some View {
         modifier(CardStyle())
+    }
+}
+
+// MARK: - 陰影修飾器
+
+extension View {
+    /// 卡片陰影：較深、較大範圍
+    func cardShadow() -> some View {
+        shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
+
+    /// 小型陰影：輕微浮起
+    func smallShadow() -> some View {
+        shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+    }
+
+    /// 列陰影：微弱分層
+    func rowShadow() -> some View {
+        shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
+    }
+
+    /// 中型陰影：面板層級
+    func mediumShadow() -> some View {
+        shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
     }
 }
 
@@ -176,7 +248,7 @@ struct NotebookTextField: View {
         }
         .padding(12)
         .background(AppColor.background.opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
     }
 }
 
@@ -201,7 +273,7 @@ struct WarmInfoBadge: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(AppColor.background)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous))
     }
 }
 
@@ -375,3 +447,122 @@ struct ShareSheetView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
+// MARK: - 扣抵值走勢迷你圖
+
+/// 顯示單條均線未來 N 日扣抵值走勢，以現價為基準線
+struct DeductionForecastChart: View {
+    let info: TechnicalIndicators.MADeductionInfo
+    let height: CGFloat
+
+    init(info: TechnicalIndicators.MADeductionInfo, height: CGFloat = 44) {
+        self.info = info
+        self.height = height
+    }
+
+    var body: some View {
+        let points = info.futureDeductions
+        guard points.count >= 2 else { return AnyView(EmptyView()) }
+
+        let prices = points.map(\.deductionPrice)
+        let currentPrice = info.currentPrice
+
+        // Y 軸範圍：扣抵值 + 現價中取 min/max
+        let allValues = prices + [currentPrice]
+        let minVal = allValues.min()!
+        let maxVal = allValues.max()!
+        let range = maxVal - minVal
+        let safeRange = range > 0 ? range : 1
+
+        return AnyView(
+            VStack(alignment: .leading, spacing: 4) {
+                // 標題列：均線名稱 + 翻轉提示
+                HStack(spacing: 4) {
+                    Text(info.periodLabel)
+                        .font(.warmTertiary(.semibold))
+                        .foregroundStyle(AppColor.textMain)
+                    if let flip = info.flipDay {
+                        Text("第\(flip)天翻轉")
+                            .font(.warmMicro(.semibold))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(.orange.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                    Spacer()
+                }
+
+                // 圖表
+                GeometryReader { geo in
+                    let w = geo.size.width
+                    let h = geo.size.height
+
+                    // 現價基準線 Y 位置
+                    let priceY = h * (1 - (currentPrice - minVal) / safeRange)
+
+                    // 扣抵值各點座標
+                    let stepX = w / CGFloat(points.count - 1)
+                    let coords: [CGPoint] = points.enumerated().map { i, p in
+                        let x = stepX * CGFloat(i)
+                        let y = h * (1 - (p.deductionPrice - minVal) / safeRange)
+                        return CGPoint(x: x, y: y)
+                    }
+
+                    // 現價基準線
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: priceY))
+                        path.addLine(to: CGPoint(x: w, y: priceY))
+                    }
+                    .stroke(AppColor.textSecondary.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+
+                    // 扣抵值折線（分段著色）
+                    ForEach(0..<coords.count - 1, id: \.self) { i in
+                        Path { path in
+                            path.move(to: coords[i])
+                            path.addLine(to: coords[i + 1])
+                        }
+                        .stroke(
+                            segmentColor(deduction: prices[i], nextDeduction: prices[i + 1], currentPrice: currentPrice),
+                            style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                        )
+                    }
+
+                    // 各點圓點
+                    ForEach(0..<coords.count, id: \.self) { i in
+                        Circle()
+                            .fill(prices[i] < currentPrice ? AppColor.softUp : (prices[i] > currentPrice ? AppColor.softDown : AppColor.textSecondary))
+                            .frame(width: 5, height: 5)
+                            .position(coords[i])
+                    }
+
+                    // 左側「現價」標籤
+                    Text("現價")
+                        .font(.system(size: 7, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppColor.textSecondary.opacity(0.6))
+                        .position(x: 14, y: priceY - 7)
+                }
+                .frame(height: height)
+
+                // X 軸標籤
+                HStack {
+                    ForEach(0..<points.count, id: \.self) { i in
+                        Text(i == 0 ? "今" : "+\(i)")
+                            .font(.system(size: 7, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppColor.textSecondary.opacity(0.6))
+                        if i < points.count - 1 {
+                            Spacer()
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    private func segmentColor(deduction: Double, nextDeduction: Double, currentPrice: Double) -> Color {
+        let avgDeduction = (deduction + nextDeduction) / 2
+        if avgDeduction < currentPrice { return AppColor.softUp }
+        if avgDeduction > currentPrice { return AppColor.softDown }
+        return AppColor.textSecondary
+    }
+}
+

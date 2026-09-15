@@ -25,6 +25,8 @@ final class BuyAnalysisViewModel {
 
     var institutionalSummary: StockService.InstitutionalSummary?
 
+    var maDeductions: [TechnicalIndicators.MADeductionInfo] = []
+
     var isLoading: Bool = false
     var errorMessage: String?
     var hasResult: Bool = false
@@ -155,6 +157,12 @@ final class BuyAnalysisViewModel {
                 foreignCumulativeNet: instSummary?.foreignCumulativeNet,
                 trustCumulativeNet: instSummary?.trustCumulativeNet,
                 regime: signal.regime
+            )
+
+            // 均線扣抵值分析
+            maDeductions = TechnicalIndicators.computeMADeductions(
+                closes: closes,
+                currentPrice: currentPrice
             )
 
             hasResult = true

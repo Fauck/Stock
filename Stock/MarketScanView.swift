@@ -205,7 +205,7 @@ struct MarketScanView: View {
             Text("漲跌%")
                 .frame(width: 60, alignment: .trailing)
         }
-        .font(.system(size: 9, weight: .medium, design: .rounded))
+        .font(.warmMicro())
         .foregroundStyle(AppColor.textSecondary.opacity(0.7))
         .padding(.vertical, 6)
     }
@@ -218,7 +218,7 @@ struct MarketScanView: View {
         return HStack(spacing: 0) {
             // 排名
             Text("\(index)")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .font(.warmSecondaryData(.bold))
                 .foregroundStyle(index <= 3 ? AppColor.primary : AppColor.textSecondary)
                 .frame(width: 22, alignment: .center)
 
@@ -248,14 +248,14 @@ struct MarketScanView: View {
 
             // 現價
             Text(formatPrice(item.closePrice))
-                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .font(.warmSecondaryData())
                 .foregroundStyle(AppColor.textMain)
                 .frame(width: 55, alignment: .trailing)
 
             // 漲跌幅
             VStack(alignment: .trailing, spacing: 1) {
                 Text(String(format: "%+.2f%%", item.changePercent))
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .font(.warmSecondaryData(.bold))
                 Text(String(format: "%+.2f", item.change))
                     .font(.system(size: 9, design: .rounded))
             }

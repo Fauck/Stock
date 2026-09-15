@@ -156,7 +156,7 @@ struct MortgageCalculatorView: View {
                 .font(.warmBody())
                 .padding(10)
                 .background(AppColor.background)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
         }
     }
 
@@ -178,7 +178,7 @@ struct MortgageCalculatorView: View {
                 .padding(.vertical, 12)
                 .background(AppColor.cardBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+                .smallShadow()
             }
 
             Button {
@@ -196,7 +196,7 @@ struct MortgageCalculatorView: View {
                 .padding(.vertical, 12)
                 .background(AppColor.primary)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+                .smallShadow()
             }
         }
     }
