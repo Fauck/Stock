@@ -61,6 +61,7 @@ struct KLineChartView: View {
             indicatorChip("MA5", isOn: vm.showMA5) { vm.showMA5.toggle() }
             indicatorChip("MA20", isOn: vm.showMA20) { vm.showMA20.toggle() }
             indicatorChip("量", isOn: vm.showVolume) { vm.showVolume.toggle() }
+            indicatorChip("MACD", isOn: vm.showMACD) { vm.showMACD.toggle() }
             Spacer()
         }
         .padding(.horizontal, 4)
@@ -177,6 +178,13 @@ struct KLineChartView: View {
                     drawVolumeBars(context: context, layout: layout, volArea: volArea)
                 }
 
+                // MACD 子圖
+                if vm.showMACD {
+                    let macdArea = layout.macdArea(in: size)
+                    drawMACDSeparator(context: context, layout: layout, size: size)
+                    drawMACDChart(context: context, layout: layout, macdArea: macdArea)
+                }
+
                 // 蠟燭
                 drawCandles(context: context, layout: layout, area: area)
 
@@ -197,7 +205,7 @@ struct KLineChartView: View {
                 if !vm.isDragging, let idx = vm.selectedCandleIndex, idx >= 0, idx < candles.count {
                     let x = layout.xForIndex(idx, in: area)
                     var highlightPath = Path()
-                    let highlightBottom = vm.showVolume ? layout.volumeArea(in: size).maxY : area.maxY
+                    let highlightBottom = layout.bottomMostY(in: size)
                     highlightPath.move(to: CGPoint(x: x, y: area.minY))
                     highlightPath.addLine(to: CGPoint(x: x, y: highlightBottom))
                     context.stroke(
@@ -213,7 +221,7 @@ struct KLineChartView: View {
                     let chCandle = candles[chIdx]
                     let chX = layout.xForIndex(chIdx, in: area)
                     let chY = layout.yForPrice(chCandle.close, in: area)
-                    let chBottom = vm.showVolume ? layout.volumeArea(in: size).maxY : area.maxY
+                    let chBottom = layout.bottomMostY(in: size)
                     let chColor = AppColor.textMain.opacity(0.6)
                     let dashStyle = StrokeStyle(lineWidth: 0.5, dash: [4, 3])
 
@@ -265,7 +273,7 @@ struct KLineChartView: View {
                 // Y 軸價格標籤
                 drawPriceAxis(context: context, layout: layout, size: size, area: area)
             }
-            .frame(height: vm.showVolume ? 280 : 220)
+            .frame(height: layout.canvasHeight)
             .overlay {
                 GeometryReader { geo in
                     Color.clear
@@ -699,6 +707,107 @@ struct KLineChartView: View {
         )
     }
 
+    // MARK: - MACD Drawing
+
+    private func drawMACDSeparator(context: GraphicsContext, layout: ChartLayout, size: CGSize) {
+        let macdArea = layout.macdArea(in: size)
+        let y = macdArea.minY - 2
+        var path = Path()
+        path.move(to: CGPoint(x: macdArea.minX, y: y))
+        path.addLine(to: CGPoint(x: macdArea.maxX, y: y))
+        context.stroke(
+            path,
+            with: .color(AppColor.divider.opacity(0.5)),
+            style: StrokeStyle(lineWidth: 0.5)
+        )
+    }
+
+    private func drawMACDChart(context: GraphicsContext, layout: ChartLayout, macdArea: CGRect) {
+        guard vm.macdAbsMax > 0 else { return }
+        let bodyWidth = layout.candleWidth * 0.7
+
+        // 零軸
+        let zeroY = macdArea.midY
+        var zeroPath = Path()
+        zeroPath.move(to: CGPoint(x: macdArea.minX, y: zeroY))
+        zeroPath.addLine(to: CGPoint(x: macdArea.maxX, y: zeroY))
+        context.stroke(
+            zeroPath,
+            with: .color(AppColor.divider.opacity(0.4)),
+            style: StrokeStyle(lineWidth: 0.5, dash: [3, 3])
+        )
+
+        // 柱狀圖
+        for (i, result) in vm.macdData.enumerated() {
+            guard let r = result else { continue }
+            let x = layout.xForIndex(i, in: macdArea)
+            let barY = layout.yForMACD(r.histogram, in: macdArea)
+            let color = r.histogram >= 0 ? AppColor.softUp : AppColor.softDown
+            let topY = min(barY, zeroY)
+            let barHeight = max(abs(barY - zeroY), 0.5)
+            let barRect = CGRect(
+                x: x - bodyWidth / 2,
+                y: topY,
+                width: bodyWidth,
+                height: barHeight
+            )
+            context.fill(Path(barRect), with: .color(color.opacity(0.5)))
+        }
+
+        // DIF 線
+        drawMACDLine(context: context, layout: layout, macdArea: macdArea,
+                     values: vm.macdData.map { $0?.dif },
+                     color: AppColor.softUp.opacity(0.9))
+
+        // DEA 線
+        drawMACDLine(context: context, layout: layout, macdArea: macdArea,
+                     values: vm.macdData.map { $0?.dea },
+                     color: AppColor.softDown.opacity(0.9))
+
+        // 左上角圖例
+        let difLabel = Text("DIF")
+            .font(.system(size: 8, weight: .medium, design: .rounded))
+            .foregroundColor(AppColor.softUp.opacity(0.9))
+        context.draw(context.resolve(difLabel),
+                     at: CGPoint(x: macdArea.minX + 2, y: macdArea.minY + 2), anchor: .topLeading)
+
+        let deaLabel = Text("DEA")
+            .font(.system(size: 8, weight: .medium, design: .rounded))
+            .foregroundColor(AppColor.softDown.opacity(0.9))
+        context.draw(context.resolve(deaLabel),
+                     at: CGPoint(x: macdArea.minX + 26, y: macdArea.minY + 2), anchor: .topLeading)
+    }
+
+    private func drawMACDLine(
+        context: GraphicsContext,
+        layout: ChartLayout,
+        macdArea: CGRect,
+        values: [Double?],
+        color: Color
+    ) {
+        var path = Path()
+        var started = false
+
+        for (i, value) in values.enumerated() {
+            guard let v = value else {
+                started = false
+                continue
+            }
+            let point = CGPoint(
+                x: layout.xForIndex(i, in: macdArea),
+                y: layout.yForMACD(v, in: macdArea)
+            )
+            if started {
+                path.addLine(to: point)
+            } else {
+                path.move(to: point)
+                started = true
+            }
+        }
+
+        context.stroke(path, with: .color(color), lineWidth: 1)
+    }
+
     // MARK: - Date Axis
 
     private func dateAxisLabels(layout: ChartLayout) -> some View {
@@ -767,6 +876,10 @@ struct KLineChartView: View {
                     Spacer()
                 }
             }
+
+            if vm.showMACD, let macdResult = vm.macdData[safe: index] ?? nil {
+                macdTooltipRow(macdResult)
+            }
         }
         .font(.warmCaption2())
         .padding(8)
@@ -817,6 +930,11 @@ struct KLineChartView: View {
                     Spacer()
                 }
             }
+
+            if vm.showMACD, let idx = vm.selectedCandleIndex,
+               let macdResult = vm.macdData[safe: idx] ?? nil {
+                macdTooltipRow(macdResult)
+            }
         }
         .font(.warmCaption2())
         .padding(8)
@@ -830,6 +948,19 @@ struct KLineChartView: View {
                 .foregroundStyle(AppColor.textSecondary)
             Text(value)
                 .foregroundStyle(color)
+        }
+    }
+
+    private func macdTooltipRow(_ result: TechnicalIndicators.MACDResult) -> some View {
+        HStack(spacing: 12) {
+            miniLabel("DIF", value: String(format: "%.2f", result.dif),
+                      color: AppColor.softUp.opacity(0.9))
+            miniLabel("DEA", value: String(format: "%.2f", result.dea),
+                      color: AppColor.softDown.opacity(0.9))
+            let histColor = result.histogram >= 0 ? AppColor.softUp : AppColor.softDown
+            miniLabel("柱", value: String(format: "%.2f", result.histogram),
+                      color: histColor)
+            Spacer()
         }
     }
 
@@ -862,15 +993,29 @@ private struct ChartLayout {
     let sellIndex: Int?
     let showVolume: Bool
     let volumeMax: Int
+    let showMACD: Bool
+    let macdAbsMax: Double
 
     private static let insets = EdgeInsets(top: 8, leading: 40, bottom: 4, trailing: 40)
     private static let volumeHeight: CGFloat = 56
     private static let volumeGap: CGFloat = 4
+    private static let macdHeight: CGFloat = 60
+    private static let macdGap: CGFloat = 4
+
+    /// 計算 Canvas 總高度
+    var canvasHeight: CGFloat {
+        var h: CGFloat = 220
+        if showVolume { h += Self.volumeHeight + Self.volumeGap }
+        if showMACD { h += Self.macdHeight + Self.macdGap }
+        return h
+    }
 
     init(candles: [CandleItem], vm: KLineChartViewModel) {
         self.candles = candles
         self.showVolume = vm.showVolume
         self.volumeMax = vm.volumeMax
+        self.showMACD = vm.showMACD
+        self.macdAbsMax = vm.macdAbsMax
 
         // 找最近的蠟燭 index
         self.buyIndex = vm.buyMarker.flatMap { Self.closestIndex(to: $0.date, in: candles) }
@@ -914,11 +1059,12 @@ private struct ChartLayout {
 
     func drawableArea(in size: CGSize) -> CGRect {
         let volumeReserve: CGFloat = showVolume ? Self.volumeHeight + Self.volumeGap : 0
+        let macdReserve: CGFloat = showMACD ? Self.macdHeight + Self.macdGap : 0
         return CGRect(
             x: Self.insets.leading,
             y: Self.insets.top,
             width: max(1, size.width - Self.insets.leading - Self.insets.trailing),
-            height: max(1, size.height - Self.insets.top - Self.insets.bottom - volumeReserve)
+            height: max(1, size.height - Self.insets.top - Self.insets.bottom - volumeReserve - macdReserve)
         )
     }
 
@@ -936,6 +1082,35 @@ private struct ChartLayout {
         guard volumeMax > 0 else { return volArea.maxY }
         let ratio = CGFloat(volume) / CGFloat(volumeMax)
         return volArea.maxY - volArea.height * ratio
+    }
+
+    func macdArea(in size: CGSize) -> CGRect {
+        // MACD 區在成交量下方（若有），否則在價格區下方
+        let prevBottom: CGFloat
+        if showVolume {
+            prevBottom = volumeArea(in: size).maxY
+        } else {
+            prevBottom = drawableArea(in: size).maxY
+        }
+        return CGRect(
+            x: drawableArea(in: size).minX,
+            y: prevBottom + Self.macdGap,
+            width: drawableArea(in: size).width,
+            height: Self.macdHeight
+        )
+    }
+
+    func yForMACD(_ value: Double, in macdArea: CGRect) -> CGFloat {
+        guard macdAbsMax > 0 else { return macdArea.midY }
+        let ratio = value / macdAbsMax
+        return macdArea.midY - macdArea.height / 2 * ratio
+    }
+
+    /// 取得最底部子圖的 maxY（用於十字線/選中高亮延伸）
+    func bottomMostY(in size: CGSize) -> CGFloat {
+        if showMACD { return macdArea(in: size).maxY }
+        if showVolume { return volumeArea(in: size).maxY }
+        return drawableArea(in: size).maxY
     }
 
     func xForIndex(_ index: Int, in area: CGRect) -> CGFloat {

@@ -31,6 +31,7 @@ final class KLineChartViewModel {
     var showMA5: Bool = true
     var showMA20: Bool = true
     var showVolume: Bool = true
+    var showMACD: Bool = false
 
     // MARK: - Crosshair State
     var isDragging: Bool = false
@@ -40,6 +41,8 @@ final class KLineChartViewModel {
     var ma5: [Double?] = []
     var ma20: [Double?] = []
     var volumeMax: Int = 0
+    var macdData: [TechnicalIndicators.MACDResult?] = []
+    var macdAbsMax: Double = 0
 
     // MARK: - Date Formatters
 
@@ -182,5 +185,10 @@ final class KLineChartViewModel {
         ma5 = TechnicalIndicators.sma(closes: closes, period: settings.maShortPeriod)
         ma20 = TechnicalIndicators.sma(closes: closes, period: settings.maLongPeriod)
         volumeMax = candles.map(\.volume).max() ?? 0
+
+        // MACD
+        macdData = TechnicalIndicators.macd(closes: closes)
+        let absValues = macdData.compactMap { $0 }.flatMap { [abs($0.dif), abs($0.dea), abs($0.histogram)] }
+        macdAbsMax = absValues.max() ?? 0
     }
 }

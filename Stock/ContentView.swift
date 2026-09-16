@@ -10,6 +10,7 @@ import SwiftData
 
 /// 主視圖：使用 TabView 整合四個主要頁面，溫暖日誌風格
 struct ContentView: View {
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var selectedTab = 0
 
     var body: some View {
@@ -45,6 +46,12 @@ struct ContentView: View {
                 .tag(4)
         }
         .tint(AppColor.primary)
+        .fullScreenCover(isPresented: Binding(
+            get: { !hasCompletedOnboarding },
+            set: { if $0 == false { hasCompletedOnboarding = true } }
+        )) {
+            OnboardingView(hasCompletedOnboarding: $hasCompletedOnboarding)
+        }
     }
 }
 
