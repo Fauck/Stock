@@ -106,6 +106,18 @@ struct TransactionHistoryView: View {
             Text("在選定的時間區間內沒有買入紀錄")
                 .font(.warmCaption())
                 .foregroundStyle(AppColor.textSecondary)
+
+            HStack(spacing: 6) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.warmDataValue())
+                Text("試試調整篩選條件")
+                    .font(.warmCaption())
+            }
+            .foregroundStyle(AppColor.primary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(AppColor.primary.opacity(0.08))
+            .clipShape(Capsule())
         }
     }
 

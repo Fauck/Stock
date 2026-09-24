@@ -60,6 +60,18 @@ struct DashboardView: View {
             Text("平倉後的交易將顯示在此儀表板中")
                 .font(.warmCaption())
                 .foregroundStyle(AppColor.textSecondary)
+
+            HStack(spacing: 6) {
+                Image(systemName: "leaf.fill")
+                    .font(.warmDataValue())
+                Text("前往「持有庫存」頁籤賣出持股")
+                    .font(.warmCaption())
+            }
+            .foregroundStyle(AppColor.primary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(AppColor.primary.opacity(0.08))
+            .clipShape(Capsule())
         }
     }
 

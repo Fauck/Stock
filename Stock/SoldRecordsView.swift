@@ -150,6 +150,18 @@ struct SoldRecordsView: View {
             Text("在選定的時間區間內沒有已平倉的交易紀錄")
                 .font(.warmCaption())
                 .foregroundStyle(AppColor.textSecondary)
+
+            HStack(spacing: 6) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.warmDataValue())
+                Text("試試調整篩選條件")
+                    .font(.warmCaption())
+            }
+            .foregroundStyle(AppColor.primary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(AppColor.primary.opacity(0.08))
+            .clipShape(Capsule())
         }
     }
 
@@ -811,6 +823,18 @@ struct SoldRecordsView: View {
             Text("尚無持有中部位")
                 .font(.warmSubheadline())
                 .foregroundStyle(AppColor.textSecondary)
+
+            HStack(spacing: 6) {
+                Image(systemName: "calendar.badge.plus")
+                    .font(.warmDataValue())
+                Text("前往「行事曆」頁籤新增買入紀錄")
+                    .font(.warmCaption())
+            }
+            .foregroundStyle(AppColor.primary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(AppColor.primary.opacity(0.08))
+            .clipShape(Capsule())
         }
         .frame(maxWidth: .infinity, minHeight: 300)
     }

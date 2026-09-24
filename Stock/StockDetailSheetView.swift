@@ -29,6 +29,7 @@ struct StockDetailSheetView: View {
     private var allInvestments: [Investment]
     @State private var chartVM: KLineChartViewModel
     @State private var showingTargetStopEdit = false
+    @State private var selectedDetailTab = 0
 
     /// 動態計算目標/停損（從 @Query 即時讀取，編輯後自動更新）
     private var liveJournalTarget: JournalTarget? {
@@ -77,89 +78,105 @@ struct StockDetailSheetView: View {
             ZStack {
                 AppColor.background.ignoresSafeArea()
 
-                ScrollView {
-                    VStack(spacing: 14) {
-                        // K 線走勢圖
-                        klineSection
+                VStack(spacing: 0) {
+                    // 分頁切換列
+                    detailTabBar
 
-                        // 技術指標信號
-                        if let signal {
-                            technicalSignalSection(signal)
-                        }
+                    ScrollView {
+                        VStack(spacing: 14) {
+                            switch selectedDetailTab {
+                            case 0: // K 線
+                                klineSection
 
-                        // 背離信號
-                        if let signal, !signal.divergences.isEmpty {
-                            divergenceSection(signal.divergences)
-                        }
-
-                        // 賣出建議
-                        if let rec = sellRecommendation {
-                            sellRecommendationSection(rec)
-                        }
-
-                        // 目標 / 停損
-                        if let price = currentPrice,
-                           let jt = liveJournalTarget,
-                           (jt.targetPrice != nil || jt.stopLoss != nil) {
-                            targetStopSection(currentPrice: price, target: jt, avgCost: group.weightedAverageCost)
-                        } else {
-                            // 尚未設定，提供設定按鈕
-                            Button { showingTargetStopEdit = true } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "target")
-                                        .font(.system(size: 12))
-                                    Text("設定目標 / 停損")
-                                        .font(.warmDataValue())
+                            case 1: // 指標
+                                if let signal {
+                                    technicalSignalSection(signal)
+                                    indicatorDashboard(signal)
                                 }
-                                .foregroundStyle(AppColor.primary)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 10)
-                                .frame(maxWidth: .infinity)
-                                .background(AppColor.primary.opacity(0.08))
-                                .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
+
+                                if let signal, !signal.divergences.isEmpty {
+                                    divergenceSection(signal.divergences)
+                                }
+
+                                if let signal, !signal.candlestickPatterns.isEmpty {
+                                    candlestickPatternSection(signal.candlestickPatterns)
+                                }
+
+                                if !maDeductions.isEmpty {
+                                    maDeductionSection
+                                }
+
+                                if let stats = weekStats,
+                                   stats.high52w > stats.low52w {
+                                    weekStatsSection(stats)
+                                }
+
+                                if TradingFeeSettings.load().supportResistanceEnabled,
+                                   let signal, let price = currentPrice {
+                                    supportResistanceSection(signal: signal, currentPrice: price)
+                                }
+
+                            case 2: // 市場
+                                if let inst = institutionalData {
+                                    institutionalSection(inst)
+                                }
+
+                                if let margin = marginData {
+                                    marginTradingSection(margin)
+                                }
+
+                                buyScoreSummary
+
+                                if institutionalData == nil && marginData == nil {
+                                    noDataPlaceholder("暫無市場資訊")
+                                }
+
+                            case 3: // 分析
+                                // 持倉損益摘要
+                                if let price = currentPrice {
+                                    positionSummaryCard(currentPrice: price)
+                                }
+
+                                // 交易日誌摘要 + R 倍數預估
+                                journalSummaryCard
+
+                                if let rec = sellRecommendation {
+                                    sellRecommendationSection(rec)
+                                }
+
+                                if let price = currentPrice,
+                                   let jt = liveJournalTarget,
+                                   (jt.targetPrice != nil || jt.stopLoss != nil) {
+                                    targetStopSection(currentPrice: price, target: jt, avgCost: group.weightedAverageCost)
+                                } else {
+                                    Button { showingTargetStopEdit = true } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "target")
+                                                .font(.system(size: 12))
+                                            Text("設定目標 / 停損")
+                                                .font(.warmDataValue())
+                                        }
+                                        .foregroundStyle(AppColor.primary)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 10)
+                                        .frame(maxWidth: .infinity)
+                                        .background(AppColor.primary.opacity(0.08))
+                                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+
+                                if let price = currentPrice, let high = highSinceBuy, high > 0 {
+                                    trailingStopSection(currentPrice: price, highSinceBuy: high, avgCost: group.weightedAverageCost)
+                                }
+
+                            default:
+                                EmptyView()
                             }
-                            .buttonStyle(.plain)
                         }
-
-                        // 移動停利建議
-                        if let price = currentPrice, let high = highSinceBuy, high > 0 {
-                            trailingStopSection(currentPrice: price, highSinceBuy: high, avgCost: group.weightedAverageCost)
-                        }
-
-                        // 法人買賣超
-                        if let inst = institutionalData {
-                            institutionalSection(inst)
-                        }
-
-                        // 融資融券
-                        if let margin = marginData {
-                            marginTradingSection(margin)
-                        }
-
-                        // 均線扣抵值
-                        if !maDeductions.isEmpty {
-                            maDeductionSection
-                        }
-
-                        // K 線型態（僅供參考）
-                        if let signal, !signal.candlestickPatterns.isEmpty {
-                            candlestickPatternSection(signal.candlestickPatterns)
-                        }
-
-                        // 52 週區間
-                        if let stats = weekStats,
-                           stats.high52w > stats.low52w {
-                            weekStatsSection(stats)
-                        }
-                        // 壓力/支撐價位
-                        if TradingFeeSettings.load().supportResistanceEnabled,
-                           let signal, let price = currentPrice {
-                            supportResistanceSection(signal: signal, currentPrice: price)
-                        }
-
+                        .padding(.horizontal)
+                        .padding(.vertical, 12)
                     }
-                    .padding(.horizontal)
-                    .padding(.vertical, 12)
                 }
             }
             .navigationTitle("\(displayName) (\(group.ticker))")
@@ -207,6 +224,53 @@ struct StockDetailSheetView: View {
         allInvestments.first { $0.ticker == group.ticker }
     }
 
+    // MARK: - 分頁切換列
+
+    private var detailTabBar: some View {
+        let tabs = ["K線", "指標", "市場", "分析"]
+        return HStack(spacing: 0) {
+            ForEach(Array(tabs.enumerated()), id: \.offset) { index, title in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedDetailTab = index
+                    }
+                } label: {
+                    VStack(spacing: 6) {
+                        Text(title)
+                            .font(.system(.body, design: .rounded).weight(.semibold))
+                            .foregroundStyle(selectedDetailTab == index ? AppColor.primary : AppColor.textSecondary)
+
+                        RoundedRectangle(cornerRadius: 1.5)
+                            .fill(selectedDetailTab == index ? AppColor.primary : .clear)
+                            .frame(height: 3)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+        .background(AppColor.background)
+    }
+
+    // MARK: - 無資料佔位
+
+    private func noDataPlaceholder(_ message: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: "tray")
+                .font(.system(size: 28))
+                .foregroundStyle(AppColor.textSecondary.opacity(0.5))
+            Text(message)
+                .font(.warmBody())
+                .foregroundStyle(AppColor.textSecondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+    }
+
     // MARK: - K 線走勢圖
 
     private var klineSection: some View {
@@ -240,6 +304,35 @@ struct StockDetailSheetView: View {
                 Text("技術指標")
                     .font(.warmCaption())
                     .foregroundStyle(AppColor.textSecondary)
+
+                Spacer()
+
+                // 市場體質 regime pill
+                let regimeColor: Color = {
+                    switch signal.regime {
+                    case .bullish:  return AppColor.softUp
+                    case .bearish:  return AppColor.softDown
+                    case .sideways: return AppColor.secondary
+                    }
+                }()
+                let regimeIcon: String = {
+                    switch signal.regime {
+                    case .bullish:  return "arrow.up.right"
+                    case .bearish:  return "arrow.down.right"
+                    case .sideways: return "arrow.left.arrow.right"
+                    }
+                }()
+                HStack(spacing: 3) {
+                    Image(systemName: regimeIcon)
+                        .font(.system(size: 8, weight: .bold))
+                    Text(signal.regime.label)
+                        .font(.warmMicro(.semibold))
+                }
+                .foregroundStyle(regimeColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(regimeColor.opacity(0.12))
+                .clipShape(Capsule())
             }
 
             // 操作建議（觸發條件摘要）
@@ -377,6 +470,120 @@ struct StockDetailSheetView: View {
         }
     }
 
+    // MARK: - 指標數值儀表板
+
+    private func indicatorDashboard(_ signal: TechnicalIndicators.SignalSummary) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                Image(systemName: "gauge.with.dots.needle.33percent")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("指標數值")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            // 2-column grid
+            let columns = [GridItem(.flexible()), GridItem(.flexible())]
+            LazyVGrid(columns: columns, spacing: 6) {
+                if let rsi = signal.rsi {
+                    indicatorCell(
+                        "RSI",
+                        value: String(format: "%.1f", rsi),
+                        color: rsi > 80 ? AppColor.softDown : (rsi < 20 ? AppColor.softUp : AppColor.textMain),
+                        gauge: rsi / 100
+                    )
+                }
+                if let k = signal.kdjK, let d = signal.kdjD {
+                    indicatorCell(
+                        "KDJ",
+                        value: "K\(String(format: "%.0f", k)) D\(String(format: "%.0f", d))",
+                        color: k > 80 ? AppColor.softDown : (k < 20 ? AppColor.softUp : AppColor.textMain),
+                        gauge: k / 100
+                    )
+                }
+                if let dif = signal.macdDIF, let dea = signal.macdDEA {
+                    indicatorCell(
+                        "MACD",
+                        value: "DIF \(String(format: "%.2f", dif))",
+                        subtitle: "DEA \(String(format: "%.2f", dea))",
+                        color: dif >= dea ? AppColor.softUp : AppColor.softDown
+                    )
+                }
+                if let upper = signal.bollingerUpper,
+                   let mid = signal.bollingerMiddle,
+                   let lower = signal.bollingerLower {
+                    indicatorCell(
+                        "布林",
+                        value: String(format: "%.1f", mid),
+                        subtitle: "\(String(format: "%.0f", lower))–\(String(format: "%.0f", upper))",
+                        color: AppColor.textMain
+                    )
+                }
+                if let ma5 = signal.ma5Value, let ma20 = signal.ma20Value {
+                    indicatorCell(
+                        "均線",
+                        value: "MA5 \(String(format: "%.1f", ma5))",
+                        subtitle: "MA20 \(String(format: "%.1f", ma20))",
+                        color: ma5 >= ma20 ? AppColor.softUp : AppColor.softDown
+                    )
+                }
+                if let ratio = signal.volumeRatio {
+                    indicatorCell(
+                        "量比",
+                        value: String(format: "%.2fx", ratio),
+                        color: ratio > 1.5 ? AppColor.softUp : (ratio < 0.5 ? AppColor.softDown : AppColor.textMain),
+                        gauge: min(ratio / 3.0, 1.0)
+                    )
+                }
+            }
+        }
+        .padding(12)
+        .background(AppColor.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+        .cardShadow()
+    }
+
+    /// 指標數值格子
+    private func indicatorCell(
+        _ title: String,
+        value: String,
+        subtitle: String? = nil,
+        color: Color,
+        gauge: Double? = nil
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.warmMicro())
+                .foregroundStyle(AppColor.textSecondary)
+            Text(value)
+                .font(.warmDataValue(.semibold))
+                .foregroundStyle(color)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.warmMicro())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+            if let gauge {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(AppColor.background)
+                            .frame(height: 3)
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(color.opacity(0.7))
+                            .frame(width: geo.size.width * gauge, height: 3)
+                    }
+                }
+                .frame(height: 3)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppColor.background.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous))
+    }
+
     // MARK: - 背離信號卡片
 
     private func divergenceSection(_ divergences: [TechnicalIndicators.DivergenceSignal]) -> some View {
@@ -512,30 +719,44 @@ struct StockDetailSheetView: View {
                 AppColor.divider.frame(height: 0.5)
 
                 ForEach(maDeductions) { d in
-                    HStack {
-                        Text(d.periodLabel)
-                            .font(.warmSecondaryData(.semibold))
-                            .foregroundStyle(AppColor.textMain)
-                            .frame(width: 50, alignment: .leading)
-
-                        Text(formatDeductionPrice(d.deductionPrice))
-                            .font(.warmSecondaryData())
-                            .foregroundStyle(AppColor.textSecondary)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-
-                        Text(formatDeductionPrice(d.currentPrice))
-                            .font(.warmSecondaryData(.semibold))
-                            .foregroundStyle(AppColor.textMain)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-
-                        HStack(spacing: 3) {
-                            Image(systemName: deductionIcon(d.trend))
-                                .font(.system(size: 7))
-                            Text(d.trend.rawValue)
+                    VStack(spacing: 3) {
+                        HStack {
+                            Text(d.periodLabel)
                                 .font(.warmSecondaryData(.semibold))
+                                .foregroundStyle(AppColor.textMain)
+                                .frame(width: 50, alignment: .leading)
+
+                            Text(formatDeductionPrice(d.deductionPrice))
+                                .font(.warmSecondaryData())
+                                .foregroundStyle(AppColor.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+
+                            Text(formatDeductionPrice(d.currentPrice))
+                                .font(.warmSecondaryData(.semibold))
+                                .foregroundStyle(AppColor.textMain)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+
+                            HStack(spacing: 3) {
+                                Image(systemName: deductionIcon(d.trend))
+                                    .font(.system(size: 7))
+                                Text(d.trend.rawValue)
+                                    .font(.warmSecondaryData(.semibold))
+                            }
+                            .foregroundStyle(deductionColor(d.trend))
+                            .frame(width: 70, alignment: .trailing)
                         }
-                        .foregroundStyle(deductionColor(d.trend))
-                        .frame(width: 70, alignment: .trailing)
+
+                        // 翻轉日提示
+                        if let flip = d.flipDay, flip > 0, flip <= 5 {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.triangle.swap")
+                                    .font(.system(size: 7))
+                                Text("預計 \(flip) 日後趨勢翻轉")
+                                    .font(.warmMicro())
+                            }
+                            .foregroundStyle(.orange)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
                     }
                 }
             }
@@ -683,6 +904,232 @@ struct StockDetailSheetView: View {
         .cardShadow()
     }
 
+    // MARK: - 持倉損益摘要
+
+    private func positionSummaryCard(currentPrice: Double) -> some View {
+        let pl = group.unrealizedProfitLoss(currentPrice: currentPrice)
+        let retPct = group.returnPercentage(currentPrice: currentPrice)
+        let avgCost = group.weightedAverageCost
+        let totalCost = avgCost * group.totalQuantity
+        let days = group.holdingDays
+        let isProfit = pl >= 0
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 4) {
+                Image(systemName: "chart.pie")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("持倉摘要")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            // 主要損益
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(String(format: "%@%,.0f", isProfit ? "+" : "", pl))
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.profitLossColor(pl))
+
+                Text(String(format: "(%@%.1f%%)", retPct >= 0 ? "+" : "", retPct))
+                    .font(.warmDataValue(.semibold))
+                    .foregroundStyle(Color.profitLossColor(retPct))
+
+                Spacer()
+            }
+
+            // 明細 grid
+            let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
+            LazyVGrid(columns: columns, spacing: 6) {
+                positionMetric("現價", value: String(format: "%.2f", currentPrice))
+                positionMetric("均價", value: String(format: "%.2f", avgCost))
+                positionMetric("持有天", value: "\(days)")
+                positionMetric("張數", value: String(format: "%.0f", group.totalQuantity))
+                positionMetric("總成本", value: formatCurrency(totalCost))
+                positionMetric("市值", value: formatCurrency(currentPrice * group.totalQuantity))
+            }
+        }
+        .padding(12)
+        .background(AppColor.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+        .cardShadow()
+    }
+
+    private func positionMetric(_ title: String, value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.warmMicro())
+                .foregroundStyle(AppColor.textSecondary)
+            Text(value)
+                .font(.warmDataValue(.semibold))
+                .foregroundStyle(AppColor.textMain)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func formatCurrency(_ value: Double) -> String {
+        if abs(value) >= 100_000_000 {
+            return String(format: "%.1f億", value / 100_000_000)
+        } else if abs(value) >= 10_000 {
+            return String(format: "%.1f萬", value / 10_000)
+        } else {
+            return String(format: "%.0f", value)
+        }
+    }
+
+    // MARK: - 交易日誌摘要 + R 倍數預估
+
+    private var journalSummaryCard: some View {
+        let journal = latestJournalForTicker()
+
+        return Group {
+            if let j = journal, (j.hasPlan || j.emotionScore != nil) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "book.closed")
+                            .font(.warmCaption2())
+                            .foregroundStyle(AppColor.primary)
+                        Text("交易日誌")
+                            .font(.warmCaption())
+                            .foregroundStyle(AppColor.textSecondary)
+                    }
+
+                    // 進場理由
+                    if !j.setup.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("進場理由")
+                                .font(.warmMicro(.semibold))
+                                .foregroundStyle(AppColor.textSecondary)
+                            Text(j.setup)
+                                .font(.warmSecondaryData())
+                                .foregroundStyle(AppColor.textMain)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(AppColor.background.opacity(0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous))
+                    }
+
+                    // 方向 + 情緒分數
+                    HStack(spacing: 12) {
+                        HStack(spacing: 4) {
+                            Image(systemName: j.direction == "做多" ? "arrow.up.right" : "arrow.down.right")
+                                .font(.system(size: 9, weight: .bold))
+                            Text(j.direction)
+                                .font(.warmSecondaryData(.semibold))
+                        }
+                        .foregroundStyle(j.direction == "做多" ? AppColor.softUp : AppColor.softDown)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background((j.direction == "做多" ? AppColor.softUp : AppColor.softDown).opacity(0.1))
+                        .clipShape(Capsule())
+
+                        if let emo = j.emotionScore {
+                            HStack(spacing: 3) {
+                                Text(emotionIcon(emo))
+                                    .font(.system(size: 11))
+                                Text("情緒 \(emo)/5")
+                                    .font(.warmSecondaryData())
+                                    .foregroundStyle(AppColor.textMain)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(AppColor.background.opacity(0.5))
+                            .clipShape(Capsule())
+                        }
+
+                        Spacer()
+                    }
+
+                    // R 倍數預估
+                    if let stopLoss = j.initialStopLoss, let price = currentPrice,
+                       stopLoss > 0 {
+                        let entryPrice = group.weightedAverageCost
+                        let risk = abs(entryPrice - stopLoss)
+                        if risk > 0 {
+                            let currentR = (price - entryPrice) / risk
+                            AppColor.divider.frame(height: 0.5)
+
+                            HStack(spacing: 8) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("目前 R 倍數")
+                                        .font(.warmMicro())
+                                        .foregroundStyle(AppColor.textSecondary)
+                                    Text(String(format: "%@%.2fR", currentR >= 0 ? "+" : "", currentR))
+                                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                                        .foregroundStyle(Color.profitLossColor(currentR))
+                                }
+
+                                Spacer()
+
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text("初始停損")
+                                        .font(.warmMicro())
+                                        .foregroundStyle(AppColor.textSecondary)
+                                    Text(String(format: "%.1f", stopLoss))
+                                        .font(.warmSecondaryData(.semibold))
+                                        .foregroundStyle(AppColor.softDown)
+                                }
+
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text("風險 (1R)")
+                                        .font(.warmMicro())
+                                        .foregroundStyle(AppColor.textSecondary)
+                                    Text(String(format: "%.1f", risk))
+                                        .font(.warmSecondaryData(.semibold))
+                                        .foregroundStyle(AppColor.textMain)
+                                }
+                            }
+                            .padding(8)
+                            .background(Color.profitLossColor(currentR).opacity(0.06))
+                            .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous))
+
+                            HStack(spacing: 4) {
+                                Image(systemName: "lightbulb.min")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.orange)
+                                Text(rMultipleInterpretation(currentR))
+                                    .font(.warmMicro())
+                                    .foregroundStyle(AppColor.textSecondary)
+                            }
+                        }
+                    }
+                }
+                .padding(12)
+                .background(AppColor.cardBackground)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+                .cardShadow()
+            }
+        }
+    }
+
+    private func emotionIcon(_ score: Int) -> String {
+        switch score {
+        case 1: return "😰"
+        case 2: return "😟"
+        case 3: return "😐"
+        case 4: return "😊"
+        case 5: return "🤩"
+        default: return "😐"
+        }
+    }
+
+    private func rMultipleInterpretation(_ r: Double) -> String {
+        if r >= 3.0 {
+            return "獲利達 \(String(format: "%.1f", r))R，可考慮分批停利保護利潤"
+        } else if r >= 2.0 {
+            return "獲利達 \(String(format: "%.1f", r))R，已達優質交易水準"
+        } else if r >= 1.0 {
+            return "獲利達 \(String(format: "%.1f", r))R，可移動停損至損益兩平"
+        } else if r >= 0 {
+            return "目前獲利 \(String(format: "%.1f", r))R，尚未達 1R 報酬"
+        } else if r >= -0.5 {
+            return "目前虧損 \(String(format: "%.1f", abs(r)))R，仍在可控範圍"
+        } else {
+            return "目前虧損 \(String(format: "%.1f", abs(r)))R，注意停損紀律"
+        }
+    }
+
     // MARK: - 賣出建議卡片
 
     private func sellRecommendationSection(_ rec: TechnicalIndicators.SellRecommendation) -> some View {
@@ -744,28 +1191,16 @@ struct StockDetailSheetView: View {
             .background(levelColor.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.inner, style: .continuous))
 
-            // 因子列表
+            // 因子列表（分偏空 / 偏多兩組）
             if !rec.factors.isEmpty {
-                let columns = [
-                    GridItem(.flexible(), spacing: 6),
-                    GridItem(.flexible(), spacing: 6)
-                ]
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 4) {
-                    ForEach(rec.factors) { factor in
-                        HStack(spacing: 4) {
-                            Image(systemName: factor.isBearish ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
-                                .font(.system(size: 7))
-                                .foregroundStyle(factor.isBearish ? AppColor.softDown : AppColor.softUp)
-                            Text(factor.name)
-                                .font(.warmTertiary())
-                                .foregroundStyle(AppColor.textMain)
-                                .lineLimit(1)
-                            Spacer(minLength: 2)
-                            Text(factor.points > 0 ? "+\(factor.points)" : "\(factor.points)")
-                                .font(.warmTertiary(.semibold))
-                                .foregroundStyle(factor.isBearish ? AppColor.softDown : AppColor.softUp)
-                        }
-                    }
+                let bearish = rec.factors.filter(\.isBearish)
+                let bullish = rec.factors.filter { !$0.isBearish }
+
+                if !bearish.isEmpty {
+                    sellFactorGroup(title: "賣出信號", factors: bearish, isBearish: true)
+                }
+                if !bullish.isEmpty {
+                    sellFactorGroup(title: "持有信號", factors: bullish, isBearish: false)
                 }
             }
 
@@ -783,6 +1218,44 @@ struct StockDetailSheetView: View {
         .background(AppColor.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
         .cardShadow()
+    }
+
+    private func sellFactorGroup(title: String, factors: [TechnicalIndicators.SellFactor], isBearish: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 3) {
+                Image(systemName: isBearish ? "exclamationmark.triangle.fill" : "checkmark.shield.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(isBearish ? AppColor.softDown : AppColor.softUp)
+                Text(title)
+                    .font(.warmMicro(.semibold))
+                    .foregroundStyle(isBearish ? AppColor.softDown : AppColor.softUp)
+                Text("(\(factors.count))")
+                    .font(.warmMicro())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            let columns = [
+                GridItem(.flexible(), spacing: 6),
+                GridItem(.flexible(), spacing: 6)
+            ]
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 3) {
+                ForEach(factors) { factor in
+                    HStack(spacing: 3) {
+                        Text(factor.name)
+                            .font(.warmTertiary())
+                            .foregroundStyle(AppColor.textMain)
+                            .lineLimit(1)
+                        Spacer(minLength: 2)
+                        Text(factor.points > 0 ? "+\(factor.points)" : "\(factor.points)")
+                            .font(.warmTertiary(.semibold))
+                            .foregroundStyle(isBearish ? AppColor.softDown : AppColor.softUp)
+                    }
+                }
+            }
+        }
+        .padding(8)
+        .background((isBearish ? AppColor.softDown : AppColor.softUp).opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous))
     }
 
     // MARK: - 操作建議信號
@@ -1342,6 +1815,11 @@ struct StockDetailSheetView: View {
                 }
             }
 
+            // 迷你趨勢圖
+            if data.days.count >= 2 {
+                institutionalMiniChart(data)
+            }
+
             // 最近 N 日表格
             VStack(spacing: 0) {
                 // 表頭
@@ -1487,6 +1965,11 @@ struct StockDetailSheetView: View {
                 }
             }
 
+            // 迷你趨勢圖
+            if data.days.count >= 2 {
+                marginMiniChart(data)
+            }
+
             // 最近 N 日表格
             VStack(spacing: 0) {
                 // 表頭
@@ -1608,6 +2091,239 @@ struct StockDetailSheetView: View {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    // MARK: - 法人迷你趨勢圖
+
+    private func institutionalMiniChart(_ data: StockService.InstitutionalSummary) -> some View {
+        let days = Array(data.days.prefix(5).reversed()) // 由舊到新
+        let allValues = days.flatMap { [abs($0.foreignNet), abs($0.trustNet)] }
+        let maxVal = Double(allValues.max() ?? 1)
+
+        return VStack(alignment: .leading, spacing: 4) {
+            // 圖例
+            HStack(spacing: 12) {
+                HStack(spacing: 3) {
+                    Circle().fill(AppColor.primary).frame(width: 6, height: 6)
+                    Text("外資").font(.warmMicro()).foregroundStyle(AppColor.textSecondary)
+                }
+                HStack(spacing: 3) {
+                    Circle().fill(AppColor.secondary).frame(width: 6, height: 6)
+                    Text("投信").font(.warmMicro()).foregroundStyle(AppColor.textSecondary)
+                }
+                Spacer()
+            }
+
+            // 長條圖
+            HStack(alignment: .bottom, spacing: 4) {
+                ForEach(Array(days.enumerated()), id: \.offset) { _, day in
+                    VStack(spacing: 2) {
+                        HStack(alignment: .bottom, spacing: 1) {
+                            miniBar(value: day.foreignNet, maxVal: maxVal, color: AppColor.primary)
+                            miniBar(value: day.trustNet, maxVal: maxVal, color: AppColor.secondary)
+                        }
+                        Text(formatShortDate(day.date))
+                            .font(.system(size: 7, design: .monospaced))
+                            .foregroundStyle(AppColor.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(height: 50)
+        }
+        .padding(8)
+        .background(AppColor.background.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous))
+    }
+
+    /// 迷你長條（正=往上、負=往下，以零線為中心）
+    private func miniBar(value: Int, maxVal: Double, color: Color) -> some View {
+        let ratio = maxVal > 0 ? abs(Double(value)) / maxVal : 0
+        let barHeight = max(ratio * 20, 1)
+        return VStack(spacing: 0) {
+            if value >= 0 {
+                Spacer(minLength: 0)
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(color)
+                    .frame(width: 8, height: barHeight)
+                Rectangle().fill(AppColor.divider).frame(height: 0.5)
+                Spacer(minLength: 0).frame(height: 20)
+            } else {
+                Spacer(minLength: 0).frame(height: 20)
+                Rectangle().fill(AppColor.divider).frame(height: 0.5)
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(color.opacity(0.5))
+                    .frame(width: 8, height: barHeight)
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    // MARK: - 融資融券迷你趨勢圖
+
+    private func marginMiniChart(_ data: StockService.MarginTradingSummary) -> some View {
+        let days = Array(data.days.prefix(5).reversed()) // 由舊到新
+        let allChanges = days.flatMap { [abs($0.marginBuyChange), abs($0.shortSellChange)] }
+        let maxVal = Double(allChanges.max() ?? 1)
+
+        return VStack(alignment: .leading, spacing: 4) {
+            // 圖例
+            HStack(spacing: 12) {
+                HStack(spacing: 3) {
+                    Circle().fill(AppColor.softDown).frame(width: 6, height: 6)
+                    Text("融資增減").font(.warmMicro()).foregroundStyle(AppColor.textSecondary)
+                }
+                HStack(spacing: 3) {
+                    Circle().fill(AppColor.softUp).frame(width: 6, height: 6)
+                    Text("融券增減").font(.warmMicro()).foregroundStyle(AppColor.textSecondary)
+                }
+                Spacer()
+            }
+
+            // 長條圖
+            HStack(alignment: .bottom, spacing: 4) {
+                ForEach(Array(days.enumerated()), id: \.offset) { _, day in
+                    VStack(spacing: 2) {
+                        HStack(alignment: .bottom, spacing: 1) {
+                            miniBar(value: day.marginBuyChange, maxVal: maxVal, color: AppColor.softDown)
+                            miniBar(value: day.shortSellChange, maxVal: maxVal, color: AppColor.softUp)
+                        }
+                        Text(formatShortDate(day.date))
+                            .font(.system(size: 7, design: .monospaced))
+                            .foregroundStyle(AppColor.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(height: 50)
+        }
+        .padding(8)
+        .background(AppColor.background.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous))
+    }
+
+    // MARK: - 買入評分摘要
+
+    private var buyScoreSummary: some View {
+        let score: TechnicalIndicators.BuyRecommendation? = {
+            guard let sig = signal, let price = currentPrice else { return nil }
+            return TechnicalIndicators.computeBuyRecommendation(
+                signal: sig,
+                week52High: weekStats?.high52w,
+                week52Low: weekStats?.low52w,
+                currentPrice: price,
+                foreignStreak: institutionalData?.foreignStreak,
+                trustStreak: institutionalData?.trustStreak,
+                foreignCumulativeNet: institutionalData?.foreignCumulativeNet,
+                trustCumulativeNet: institutionalData?.trustCumulativeNet,
+                marginTotalChange: marginData?.marginBuyTotalChange,
+                shortTotalChange: marginData?.shortSellTotalChange,
+                regime: sig.regime
+            )
+        }()
+
+        return Group {
+            if let rec = score {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "gauge.with.dots.needle.67percent")
+                            .font(.warmCaption2())
+                            .foregroundStyle(AppColor.primary)
+                        Text("綜合買入評分")
+                            .font(.warmCaption())
+                            .foregroundStyle(AppColor.textSecondary)
+                    }
+
+                    // 分數與等級
+                    HStack(spacing: 12) {
+                        // 環形分數
+                        ZStack {
+                            Circle()
+                                .stroke(AppColor.background, lineWidth: 4)
+                                .frame(width: 52, height: 52)
+                            Circle()
+                                .trim(from: 0, to: Double(rec.score) / 100.0)
+                                .stroke(buyScoreColor(rec.level), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                                .frame(width: 52, height: 52)
+                                .rotationEffect(.degrees(-90))
+                            Text("\(rec.score)")
+                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                                .foregroundStyle(buyScoreColor(rec.level))
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 4) {
+                                Image(systemName: rec.level.icon)
+                                    .font(.system(size: 12))
+                                Text(rec.level.shortLabel)
+                                    .font(.warmDataValue(.semibold))
+                            }
+                            .foregroundStyle(buyScoreColor(rec.level))
+
+                            Text(rec.level.label)
+                                .font(.warmMicro())
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+
+                        Spacer()
+                    }
+
+                    // 因子列表
+                    if !rec.factors.isEmpty {
+                        AppColor.divider.frame(height: 0.5)
+                        let bullish = rec.factors.filter(\.isBullish)
+                        let bearish = rec.factors.filter { !$0.isBullish }
+
+                        if !bullish.isEmpty {
+                            buyFactorRow(factors: bullish, isBullish: true)
+                        }
+                        if !bearish.isEmpty {
+                            buyFactorRow(factors: bearish, isBullish: false)
+                        }
+                    }
+                }
+                .padding(12)
+                .background(AppColor.cardBackground)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+                .cardShadow()
+            }
+        }
+    }
+
+    private func buyFactorRow(factors: [TechnicalIndicators.BuyFactor], isBullish: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 3) {
+                Image(systemName: isBullish ? "plus.circle.fill" : "minus.circle.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(isBullish ? AppColor.softUp : AppColor.softDown)
+                Text(isBullish ? "偏多因子" : "偏空因子")
+                    .font(.warmMicro(.semibold))
+                    .foregroundStyle(isBullish ? AppColor.softUp : AppColor.softDown)
+            }
+
+            let columns = [GridItem(.adaptive(minimum: 80), spacing: 4)]
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 4) {
+                ForEach(factors) { f in
+                    Text("\(f.name) \(f.points > 0 ? "+" : "")\(f.points)")
+                        .font(.warmMicro())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background((isBullish ? AppColor.softUp : AppColor.softDown).opacity(0.1))
+                        .foregroundStyle(isBullish ? AppColor.softUp : AppColor.softDown)
+                        .clipShape(Capsule())
+                }
+            }
+        }
+    }
+
+    private func buyScoreColor(_ level: TechnicalIndicators.BuyLevel) -> Color {
+        switch level {
+        case .strongBuy:   return AppColor.softUp
+        case .considerBuy: return AppColor.softUp.opacity(0.7)
+        case .neutral:     return AppColor.secondary
+        case .cautious:    return AppColor.softDown.opacity(0.7)
+        case .avoidBuy:    return AppColor.softDown
+        }
     }
 
     // MARK: - 52 週區間

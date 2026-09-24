@@ -18,6 +18,7 @@ struct PortfolioListView: View {
     @Query private var allJournals: [TradeJournal]
 
     @State private var vm = PortfolioListViewModel()
+    @State private var marketInfoExpanded: Set<String> = []
 
     var body: some View {
         NavigationStack {
@@ -109,9 +110,18 @@ struct PortfolioListView: View {
             Text("尚無持有部位")
                 .font(.warmHeadline())
                 .foregroundStyle(AppColor.textMain)
-            Text("請前往行事曆頁面新增買入紀錄")
-                .font(.warmCaption())
-                .foregroundStyle(AppColor.textSecondary)
+
+            HStack(spacing: 6) {
+                Image(systemName: "calendar.badge.plus")
+                    .font(.warmDataValue())
+                Text("前往「行事曆」頁籤新增買入紀錄")
+                    .font(.warmCaption())
+            }
+            .foregroundStyle(AppColor.primary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(AppColor.primary.opacity(0.08))
+            .clipShape(Capsule())
         }
     }
 
@@ -471,26 +481,28 @@ struct PortfolioListView: View {
                             }
                         }
 
-                        // ━━ 市場資訊 ━━
+                        // ━━ 市場資訊（可收合）━━
                         let hasInst = vm.institutionalData[group.ticker] != nil
                         let hasSignal = vm.technicalSignals[group.ticker] != nil
                         let hasMargin = vm.marginData[group.ticker] != nil
                         if hasInst || hasSignal || hasMargin {
-                            sectionHeader("市場資訊")
+                            collapsibleSectionHeader("市場資訊", ticker: group.ticker)
 
-                            if let inst = vm.institutionalData[group.ticker] {
-                                institutionalBanner(inst)
-                                    .padding(.horizontal, AppSpacing.lg)
-                            }
+                            if marketInfoExpanded.contains(group.ticker) {
+                                if let inst = vm.institutionalData[group.ticker] {
+                                    institutionalBanner(inst)
+                                        .padding(.horizontal, AppSpacing.lg)
+                                }
 
-                            if let margin = vm.marginData[group.ticker] {
-                                marginBanner(margin)
-                                    .padding(.horizontal, AppSpacing.lg)
-                            }
+                                if let margin = vm.marginData[group.ticker] {
+                                    marginBanner(margin)
+                                        .padding(.horizontal, AppSpacing.lg)
+                                }
 
-                            if let signal = vm.technicalSignals[group.ticker] {
-                                expandedSignalSummary(signal, ticker: group.ticker)
-                                    .padding(.horizontal, AppSpacing.lg)
+                                if let signal = vm.technicalSignals[group.ticker] {
+                                    expandedSignalSummary(signal, ticker: group.ticker)
+                                        .padding(.horizontal, AppSpacing.lg)
+                                }
                             }
                         }
 
@@ -523,13 +535,17 @@ struct PortfolioListView: View {
 
                             // 整批賣出
                             Button { vm.selectGroupForSell(group) } label: {
-                                Text("賣出")
-                                    .font(.warmTertiary(.semibold))
-                                    .padding(.horizontal, AppSpacing.l)
-                                    .padding(.vertical, 7)
-                                    .foregroundStyle(AppColor.softUp)
-                                    .background(AppColor.softUp.opacity(0.10))
-                                    .clipShape(Capsule())
+                                HStack(spacing: 3) {
+                                    Image(systemName: "rectangle.stack.fill")
+                                        .font(.system(size: 8))
+                                    Text("整批賣出")
+                                }
+                                .font(.warmTertiary(.semibold))
+                                .padding(.horizontal, AppSpacing.l)
+                                .padding(.vertical, 7)
+                                .foregroundStyle(AppColor.softUp)
+                                .background(AppColor.softUp.opacity(0.10))
+                                .clipShape(Capsule())
                             }
                         }
                         .padding(.horizontal, AppSpacing.lg)
@@ -572,6 +588,46 @@ struct PortfolioListView: View {
         }
         .padding(.horizontal, AppSpacing.lg)
         .padding(.top, AppSpacing.xs)
+    }
+
+    private func collapsibleSectionHeader(_ title: String, ticker: String) -> some View {
+        let isExpanded = marketInfoExpanded.contains(ticker)
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                if isExpanded {
+                    marketInfoExpanded.remove(ticker)
+                } else {
+                    marketInfoExpanded.insert(ticker)
+                }
+            }
+        } label: {
+            HStack(spacing: AppSpacing.m) {
+                Image(systemName: "building.columns")
+                    .font(.warmMicro())
+                    .foregroundStyle(AppColor.primary)
+                Text(title)
+                    .font(.warmTertiary(.semibold))
+                    .foregroundStyle(AppColor.textMain)
+
+                Spacer()
+
+                Text(isExpanded ? "收合" : "點擊展開")
+                    .font(.warmMicro())
+                    .foregroundStyle(AppColor.primary.opacity(0.7))
+
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(AppColor.primary)
+            }
+            .padding(.horizontal, AppSpacing.ml)
+            .padding(.vertical, AppSpacing.m)
+            .background(AppColor.primary.opacity(0.06))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous))
+            .padding(.horizontal, AppSpacing.lg)
+            .padding(.top, AppSpacing.xs)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - 風控區段
@@ -719,7 +775,7 @@ struct PortfolioListView: View {
                     Button {
                         vm.selectForSell(investment)
                     } label: {
-                        Text("賣出")
+                        Text("單筆賣出")
                             .font(.warmCaption2())
                             .fontWeight(.medium)
                             .padding(.horizontal, 10)

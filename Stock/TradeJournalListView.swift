@@ -220,6 +220,18 @@ struct TradeJournalListView: View {
             Text("在買入時展開「交易日誌」區塊即可建立")
                 .font(.warmCaption())
                 .foregroundStyle(AppColor.textSecondary)
+
+            HStack(spacing: 6) {
+                Image(systemName: "square.and.pencil")
+                    .font(.warmDataValue())
+                Text("新增買入時可一併建立日誌")
+                    .font(.warmCaption())
+            }
+            .foregroundStyle(AppColor.primary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(AppColor.primary.opacity(0.08))
+            .clipShape(Capsule())
         }
     }
 
