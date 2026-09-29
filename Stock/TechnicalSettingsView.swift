@@ -26,6 +26,8 @@ struct TechnicalSettingsView: View {
                     kdjSection
                     macdSection
                     bollingerSection
+                    atrSection
+                    adxSection
                     volumeSection
 
                     resetButton
@@ -208,6 +210,24 @@ struct TechnicalSettingsView: View {
             Divider()
             sliderRow(label: "觸軌門檻", value: $settings.bollingerNearBandThreshold,
                       range: 0.01...0.10, step: 0.01, format: "%.2f")
+        }
+    }
+
+    // MARK: - ATR
+
+    private var atrSection: some View {
+        settingsCard(title: "ATR 真實波幅", icon: "arrow.up.and.down") {
+            stepperRow(label: "ATR 週期", value: $settings.atrPeriod, range: 5...30)
+        }
+    }
+
+    // MARK: - ADX
+
+    private var adxSection: some View {
+        settingsCard(title: "ADX 趨勢強度", icon: "arrow.up.right") {
+            stepperRow(label: "ADX 週期", value: $settings.adxPeriod, range: 5...30)
+            Divider()
+            stepperRow(label: "強趨勢門檻", value: $settings.adxStrongThreshold, range: 15...40, step: 5)
         }
     }
 

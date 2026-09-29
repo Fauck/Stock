@@ -17,6 +17,7 @@ struct PortfolioListView: View {
 
     @Query private var allJournals: [TradeJournal]
 
+    @Environment(\.scenePhase) private var scenePhase
     @State private var vm = PortfolioListViewModel()
     @State private var marketInfoExpanded: Set<String> = []
 
@@ -96,6 +97,11 @@ struct PortfolioListView: View {
             .onChange(of: allJournals) { _, newValue in
                 vm.journals = newValue
                 vm.buildJournalTargets()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    vm.refreshOnForeground()
+                }
             }
         }
     }

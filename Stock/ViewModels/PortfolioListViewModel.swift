@@ -86,6 +86,11 @@ final class PortfolioListViewModel {
     /// 上次成功載入的日期（用於判斷重新整理是否需要重抓）
     private var lastLoadDate: String?
 
+    /// 上次回前景刷新的時間戳（防止頻繁切換時狂打 API）
+    private var lastForegroundRefresh: Date?
+    /// 回前景最小刷新間隔（秒）
+    private static let foregroundRefreshInterval: TimeInterval = 60
+
     // MARK: - Computed
 
     var groups: [PortfolioGroup] {
@@ -307,6 +312,19 @@ final class PortfolioListViewModel {
             }
             isFetchingPrices = false
         }
+    }
+
+    // MARK: - 回前景自動刷新
+
+    /// App 從背景回前景時呼叫，間隔超過 60 秒才真正刷新
+    func refreshOnForeground() {
+        let now = Date()
+        if let last = lastForegroundRefresh,
+           now.timeIntervalSince(last) < Self.foregroundRefreshInterval {
+            return
+        }
+        lastForegroundRefresh = now
+        loadData(forceRefresh: true)
     }
 
     // MARK: - 統一載入（分優先級）

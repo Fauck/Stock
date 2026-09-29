@@ -87,6 +87,7 @@ struct StockDetailSheetView: View {
                             switch selectedDetailTab {
                             case 0: // K 線
                                 klineSection
+                                volumeProfileSection
 
                             case 1: // 指標
                                 if let signal {
@@ -293,6 +294,201 @@ struct StockDetailSheetView: View {
         .cardShadow()
     }
 
+    // MARK: - Volume Profile
+
+    /// 從 chartVM 的 candle 資料計算 Volume Profile
+    private var volumeProfileData: TechnicalIndicators.VolumeProfileResult? {
+        let candles = chartVM.candles
+        guard candles.count > 5 else { return nil }
+        return TechnicalIndicators.volumeProfile(
+            highs: candles.map(\.high),
+            lows: candles.map(\.low),
+            closes: candles.map(\.close),
+            volumes: candles.map { Double($0.volume) }
+        )
+    }
+
+    /// 現價 vs POC 偏離提示
+    private func vpPocHint(price: Double, poc: Double) -> (text: String, color: Color) {
+        let deviation = (price - poc) / poc * 100
+        if deviation > 5 {
+            return ("偏離主力成本區，注意回測", AppColor.softDown)
+        } else if deviation < -5 {
+            return ("低於主力成本區，觀察支撐", AppColor.softDown)
+        } else {
+            return ("接近主力成本區", AppColor.softUp)
+        }
+    }
+
+    /// 現價 vs Value Area 位置提示
+    private func vpValueAreaHint(price: Double, vaHigh: Double, vaLow: Double) -> (text: String, color: Color) {
+        if price > vaHigh {
+            return ("突破密集區上緣，壓力轉支撐", AppColor.softUp)
+        } else if price < vaLow {
+            return ("跌破密集區下緣，留意支撐", AppColor.softDown)
+        } else {
+            return ("位於密集成交區間", AppColor.textSecondary)
+        }
+    }
+
+    private var volumeProfileSection: some View {
+        Group {
+            if let vp = volumeProfileData {
+                VStack(alignment: .leading, spacing: 8) {
+                    // 標題列
+                    HStack(spacing: 4) {
+                        Image(systemName: "chart.bar.xaxis")
+                            .font(.warmCaption2())
+                            .foregroundStyle(AppColor.primary)
+                        Text("成交量分佈")
+                            .font(.warmCaption())
+                            .foregroundStyle(AppColor.textSecondary)
+
+                        Spacer()
+
+                        // 天數標示
+                        Text("近 \(chartVM.candles.count) 日")
+                            .font(.warmMicro())
+                            .foregroundStyle(AppColor.textSecondary)
+                    }
+
+                    // 摘要列：POC + VA + 現價位置
+                    if let price = currentPrice {
+                        let pocHint = vpPocHint(price: price, poc: vp.pocPrice)
+                        let vaHint = vpValueAreaHint(price: price, vaHigh: vp.valueAreaHigh, vaLow: vp.valueAreaLow)
+                        let deviation = (price - vp.pocPrice) / vp.pocPrice * 100
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            // POC 行
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(AppColor.primary)
+                                    .frame(width: 5, height: 5)
+                                Text("主力成本")
+                                    .font(.warmMicro())
+                                    .foregroundStyle(AppColor.textSecondary)
+                                Text(String(format: "%.2f", vp.pocPrice))
+                                    .font(.warmMicro(.semibold))
+                                    .foregroundStyle(AppColor.textMain)
+                                Text(String(format: "%+.1f%%", deviation))
+                                    .font(.warmMicro(.semibold))
+                                    .foregroundStyle(deviation >= 0 ? AppColor.softUp : AppColor.softDown)
+
+                                Spacer()
+
+                                Text(pocHint.text)
+                                    .font(.warmMicro())
+                                    .foregroundStyle(pocHint.color)
+                            }
+
+                            // VA 行
+                            HStack(spacing: 4) {
+                                RoundedRectangle(cornerRadius: 1)
+                                    .fill(AppColor.primary.opacity(0.45))
+                                    .frame(width: 5, height: 5)
+                                Text("密集區")
+                                    .font(.warmMicro())
+                                    .foregroundStyle(AppColor.textSecondary)
+                                Text("\(vp.valueAreaLow, specifier: "%.2f") – \(vp.valueAreaHigh, specifier: "%.2f")")
+                                    .font(.warmMicro(.semibold))
+                                    .foregroundStyle(AppColor.textMain)
+
+                                Spacer()
+
+                                Text(vaHint.text)
+                                    .font(.warmMicro())
+                                    .foregroundStyle(vaHint.color)
+                            }
+                        }
+                        .padding(8)
+                        .background(AppColor.background.opacity(0.6))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous))
+                    } else {
+                        // 無現價時僅顯示基本資訊
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(AppColor.primary)
+                                .frame(width: 5, height: 5)
+                            Text("POC")
+                                .font(.warmMicro())
+                                .foregroundStyle(AppColor.textSecondary)
+                            Text(String(format: "%.2f", vp.pocPrice))
+                                .font(.warmMicro(.semibold))
+                                .foregroundStyle(AppColor.textMain)
+
+                            Spacer()
+
+                            Text("VA \(vp.valueAreaLow, specifier: "%.2f") – \(vp.valueAreaHigh, specifier: "%.2f")")
+                                .font(.warmMicro())
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+                    }
+
+                    // 橫向長條圖
+                    volumeProfileChart(vp)
+                }
+                .padding(12)
+                .background(AppColor.cardBackground)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.panel, style: .continuous))
+                .cardShadow()
+            }
+        }
+    }
+
+    /// VP 橫向長條圖
+    private func volumeProfileChart(_ vp: TechnicalIndicators.VolumeProfileResult) -> some View {
+        let maxVol = vp.levels.map(\.volume).max() ?? 1
+        let priceFormatter: (Double) -> String = { price in
+            if price >= 100 {
+                return String(format: "%.0f", price)
+            } else {
+                return String(format: "%.1f", price)
+            }
+        }
+
+        return VStack(spacing: 1) {
+            // 由高到低排列（上方=高價）
+            ForEach(Array(vp.levels.enumerated().reversed()), id: \.offset) { index, level in
+                let isPOC = index == vp.pocIndex
+                let isValueArea = level.priceMid >= vp.valueAreaLow && level.priceMid <= vp.valueAreaHigh
+                let barRatio = maxVol > 0 ? CGFloat(level.volume / maxVol) : 0
+
+                HStack(spacing: 4) {
+                    // 價格標籤
+                    Text(priceFormatter(level.priceMid))
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(isPOC ? AppColor.primary : AppColor.textSecondary)
+                        .frame(width: 40, alignment: .trailing)
+
+                    // 長條
+                    GeometryReader { geo in
+                        let barWidth = geo.size.width * barRatio
+
+                        RoundedRectangle(cornerRadius: 1.5)
+                            .fill(
+                                isPOC ? AppColor.primary :
+                                isValueArea ? AppColor.primary.opacity(0.45) :
+                                AppColor.textSecondary.opacity(0.2)
+                            )
+                            .frame(width: max(barWidth, 2), height: geo.size.height)
+                    }
+
+                    // 佔比標籤（僅 POC 或量 > 5% 顯示）
+                    if isPOC || level.percentage > 5 {
+                        Text(String(format: "%.1f%%", level.percentage))
+                            .font(.system(size: 7, weight: .medium, design: .monospaced))
+                            .foregroundStyle(isPOC ? AppColor.primary : AppColor.textSecondary)
+                            .frame(width: 30, alignment: .leading)
+                    } else {
+                        Color.clear
+                            .frame(width: 30)
+                    }
+                }
+                .frame(height: isPOC ? 10 : 8)
+            }
+        }
+    }
+
     // MARK: - 技術指標信號
 
     private func technicalSignalSection(_ signal: TechnicalIndicators.SignalSummary) -> some View {
@@ -490,6 +686,7 @@ struct StockDetailSheetView: View {
                     indicatorCell(
                         "RSI",
                         value: String(format: "%.1f", rsi),
+                        subtitle: rsiHint(rsi),
                         color: rsi > 80 ? AppColor.softDown : (rsi < 20 ? AppColor.softUp : AppColor.textMain),
                         gauge: rsi / 100
                     )
@@ -498,6 +695,7 @@ struct StockDetailSheetView: View {
                     indicatorCell(
                         "KDJ",
                         value: "K\(String(format: "%.0f", k)) D\(String(format: "%.0f", d))",
+                        subtitle: kdjHint(k: k, d: d),
                         color: k > 80 ? AppColor.softDown : (k < 20 ? AppColor.softUp : AppColor.textMain),
                         gauge: k / 100
                     )
@@ -506,17 +704,15 @@ struct StockDetailSheetView: View {
                     indicatorCell(
                         "MACD",
                         value: "DIF \(String(format: "%.2f", dif))",
-                        subtitle: "DEA \(String(format: "%.2f", dea))",
+                        subtitle: macdHint(dif: dif, dea: dea),
                         color: dif >= dea ? AppColor.softUp : AppColor.softDown
                     )
                 }
-                if let upper = signal.bollingerUpper,
-                   let mid = signal.bollingerMiddle,
-                   let lower = signal.bollingerLower {
+                if signal.bollingerMiddle != nil {
                     indicatorCell(
                         "布林",
-                        value: String(format: "%.1f", mid),
-                        subtitle: "\(String(format: "%.0f", lower))–\(String(format: "%.0f", upper))",
+                        value: String(format: "%.1f", signal.bollingerMiddle!),
+                        subtitle: bollingerHint(signal),
                         color: AppColor.textMain
                     )
                 }
@@ -524,7 +720,7 @@ struct StockDetailSheetView: View {
                     indicatorCell(
                         "均線",
                         value: "MA5 \(String(format: "%.1f", ma5))",
-                        subtitle: "MA20 \(String(format: "%.1f", ma20))",
+                        subtitle: maHint(signal),
                         color: ma5 >= ma20 ? AppColor.softUp : AppColor.softDown
                     )
                 }
@@ -532,8 +728,27 @@ struct StockDetailSheetView: View {
                     indicatorCell(
                         "量比",
                         value: String(format: "%.2fx", ratio),
+                        subtitle: volumeHint(ratio),
                         color: ratio > 1.5 ? AppColor.softUp : (ratio < 0.5 ? AppColor.softDown : AppColor.textMain),
                         gauge: min(ratio / 3.0, 1.0)
+                    )
+                }
+                if let atrVal = signal.atr, let atrPct = signal.atrPercent {
+                    indicatorCell(
+                        "ATR",
+                        value: String(format: "%.2f", atrVal),
+                        subtitle: atrHint(atrPct),
+                        color: atrPct > 3 ? AppColor.softDown : (atrPct < 1 ? AppColor.softUp : AppColor.textMain),
+                        gauge: min(atrPct / 5.0, 1.0)
+                    )
+                }
+                if let adxVal = signal.adx {
+                    indicatorCell(
+                        "ADX",
+                        value: String(format: "%.1f", adxVal),
+                        subtitle: adxHint(adx: adxVal, plusDI: signal.plusDI, minusDI: signal.minusDI),
+                        color: adxVal >= 25 ? AppColor.primary : AppColor.textSecondary,
+                        gauge: min(adxVal / 50.0, 1.0)
                     )
                 }
             }
@@ -582,6 +797,79 @@ struct StockDetailSheetView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppColor.background.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous))
+    }
+
+    // MARK: - 指標提示文字
+
+    private func rsiHint(_ rsi: Double) -> String {
+        if rsi > 80 { return "過熱，注意回檔" }
+        if rsi > 70 { return "偏強，接近過熱" }
+        if rsi < 20 { return "超賣，可能反彈" }
+        if rsi < 30 { return "偏弱，留意反彈" }
+        return "中性區間"
+    }
+
+    private func kdjHint(k: Double, d: Double) -> String {
+        if k > 80 && k > d { return "高檔鈍化" }
+        if k > 80 && k < d { return "高檔死叉" }
+        if k < 20 && k < d { return "低檔超賣" }
+        if k < 20 && k > d { return "低檔金叉" }
+        if k > d { return "多方排列" }
+        return "空方排列"
+    }
+
+    private func macdHint(dif: Double, dea: Double) -> String {
+        let diff = abs(dif - dea)
+        let base = max(abs(dif), abs(dea), 0.01)
+        if diff / base < 0.05 { return "即將交叉" }
+        if dif > dea { return "多方主導" }
+        return "空方主導"
+    }
+
+    private func bollingerHint(_ signal: TechnicalIndicators.SignalSummary) -> String {
+        if let sig = signal.bollingerSignal {
+            switch sig {
+            case .nearUpper: return "逼近壓力"
+            case .nearLower: return "逼近支撐"
+            case .squeeze: return "通道收窄，即將變盤"
+            case .normal: break
+            }
+        }
+        return "正常區間"
+    }
+
+    private func maHint(_ signal: TechnicalIndicators.SignalSummary) -> String {
+        if let cross = signal.maCross {
+            return cross == .goldenCross ? "金叉，短強" : "死叉，短弱"
+        }
+        if let ma5 = signal.ma5Value, let ma20 = signal.ma20Value {
+            return ma5 >= ma20 ? "多頭排列" : "空頭排列"
+        }
+        return ""
+    }
+
+    private func volumeHint(_ ratio: Double) -> String {
+        if ratio >= 2.0 { return "爆量，關注方向" }
+        if ratio >= 1.5 { return "量增，動能加大" }
+        if ratio >= 0.8 { return "正常量能" }
+        if ratio >= 0.5 { return "量縮，觀望" }
+        return "極度萎縮"
+    }
+
+    private func atrHint(_ pct: Double) -> String {
+        if pct > 5 { return "劇烈波動" }
+        if pct > 3 { return "波動偏大" }
+        if pct > 1 { return "正常波動" }
+        return "低波動，可能蓄勢"
+    }
+
+    private func adxHint(adx: Double, plusDI: Double?, minusDI: Double?) -> String {
+        if adx < 15 { return "盤整，等待突破" }
+        if adx < 25 { return "無明確趨勢" }
+        if let p = plusDI, let m = minusDI {
+            return p > m ? "強多頭趨勢" : "強空頭趨勢"
+        }
+        return "趨勢明確"
     }
 
     // MARK: - 背離信號卡片

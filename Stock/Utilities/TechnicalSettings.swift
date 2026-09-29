@@ -28,6 +28,13 @@ struct TechnicalSettings: Codable, Equatable, Sendable {
     var bollingerSqueezeThreshold: Double = 0.05
     var bollingerNearBandThreshold: Double = 0.02
 
+    // MARK: - ATR (Average True Range)
+    var atrPeriod: Int = 14
+
+    // MARK: - ADX (Average Directional Index)
+    var adxPeriod: Int = 14
+    var adxStrongThreshold: Double = 25
+
     // MARK: - 成交量 (Volume)
     var volumeSurgeMultiplier: Double = 2.0
     var volumeHighMultiplier: Double = 1.5

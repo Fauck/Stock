@@ -293,6 +293,299 @@ enum TechnicalIndicators {
         return result
     }
 
+    // MARK: - ATR (Average True Range)
+
+    /// 計算 True Range
+    /// TR = max(H-L, |H-prevClose|, |L-prevClose|)
+    static func trueRange(highs: [Double], lows: [Double], closes: [Double]) -> [Double] {
+        guard highs.count == lows.count, highs.count == closes.count, highs.count > 1 else {
+            return []
+        }
+
+        var tr: [Double] = [highs[0] - lows[0]]  // 第一根用 H-L
+        for i in 1..<highs.count {
+            let hl = highs[i] - lows[i]
+            let hc = abs(highs[i] - closes[i - 1])
+            let lc = abs(lows[i] - closes[i - 1])
+            tr.append(max(hl, hc, lc))
+        }
+        return tr
+    }
+
+    /// ATR (Average True Range) — Wilder's smoothing
+    /// - Parameters:
+    ///   - highs: 最高價序列（按日期升序）
+    ///   - lows: 最低價序列
+    ///   - closes: 收盤價序列
+    ///   - period: ATR 週期（常用 14）
+    /// - Returns: ATR 值陣列，前 period 個為 nil
+    static func atr(
+        highs: [Double],
+        lows: [Double],
+        closes: [Double],
+        period: Int = 14
+    ) -> [Double?] {
+        let tr = trueRange(highs: highs, lows: lows, closes: closes)
+        guard tr.count >= period else {
+            return Array(repeating: nil, count: closes.count)
+        }
+
+        var result: [Double?] = Array(repeating: nil, count: tr.count)
+
+        // 初始 ATR = 前 period 個 TR 的 SMA
+        let initialATR = tr[0..<period].reduce(0, +) / Double(period)
+        result[period - 1] = initialATR
+
+        // Wilder's smoothing: ATR = (prevATR * (period-1) + TR) / period
+        var prev = initialATR
+        for i in period..<tr.count {
+            let val = (prev * Double(period - 1) + tr[i]) / Double(period)
+            result[i] = val
+            prev = val
+        }
+
+        return result
+    }
+
+    // MARK: - ADX (Average Directional Index)
+
+    /// ADX/DMI 指標結果
+    struct ADXResult: Sendable {
+        let adx: Double      // ADX 趨勢強度 (0~100)
+        let plusDI: Double    // +DI 上升趨勢指標
+        let minusDI: Double   // -DI 下降趨勢指標
+    }
+
+    /// ADX 趨勢強度信號
+    enum ADXSignal: Sendable {
+        case strongTrend    // ADX ≥ 25，趨勢明確
+        case weakTrend      // ADX < 25，趨勢不明
+        case trendStrengthening  // ADX 上升中
+        case trendWeakening      // ADX 下降中
+
+        var label: String {
+            switch self {
+            case .strongTrend: return "趨勢強"
+            case .weakTrend: return "趨勢弱"
+            case .trendStrengthening: return "趨勢增強"
+            case .trendWeakening: return "趨勢減弱"
+            }
+        }
+    }
+
+    /// ADX (Average Directional Index) — 趨勢強度指標
+    /// - Parameters:
+    ///   - highs: 最高價序列（按日期升序）
+    ///   - lows: 最低價序列
+    ///   - closes: 收盤價序列
+    ///   - period: ADX 週期（常用 14）
+    /// - Returns: ADX 結果陣列，前面資料不足的部分為 nil
+    static func adx(
+        highs: [Double],
+        lows: [Double],
+        closes: [Double],
+        period: Int = 14
+    ) -> [ADXResult?] {
+        let count = highs.count
+        guard count == lows.count, count == closes.count, count > period + period else {
+            return Array(repeating: nil, count: count)
+        }
+
+        // Step 1: 計算 +DM 和 -DM
+        var plusDM: [Double] = [0]
+        var minusDM: [Double] = [0]
+        for i in 1..<count {
+            let upMove = highs[i] - highs[i - 1]
+            let downMove = lows[i - 1] - lows[i]
+
+            if upMove > downMove && upMove > 0 {
+                plusDM.append(upMove)
+            } else {
+                plusDM.append(0)
+            }
+
+            if downMove > upMove && downMove > 0 {
+                minusDM.append(downMove)
+            } else {
+                minusDM.append(0)
+            }
+        }
+
+        // Step 2: 計算 TR
+        let tr = trueRange(highs: highs, lows: lows, closes: closes)
+        guard tr.count == count else {
+            return Array(repeating: nil, count: count)
+        }
+
+        // Step 3: Wilder's smoothing for TR, +DM, -DM
+        guard count >= period else {
+            return Array(repeating: nil, count: count)
+        }
+
+        var smoothTR = tr[0..<period].reduce(0, +)
+        var smoothPlusDM = plusDM[0..<period].reduce(0, +)
+        var smoothMinusDM = minusDM[0..<period].reduce(0, +)
+
+        // Step 4: 計算 +DI, -DI, DX
+        var dxValues: [Double] = []
+        var result: [ADXResult?] = Array(repeating: nil, count: count)
+
+        for i in (period - 1)..<count {
+            if i > period - 1 {
+                smoothTR = smoothTR - (smoothTR / Double(period)) + tr[i]
+                smoothPlusDM = smoothPlusDM - (smoothPlusDM / Double(period)) + plusDM[i]
+                smoothMinusDM = smoothMinusDM - (smoothMinusDM / Double(period)) + minusDM[i]
+            }
+
+            let pDI = smoothTR > 0 ? (smoothPlusDM / smoothTR) * 100 : 0
+            let mDI = smoothTR > 0 ? (smoothMinusDM / smoothTR) * 100 : 0
+            let diSum = pDI + mDI
+            let dx = diSum > 0 ? abs(pDI - mDI) / diSum * 100 : 0
+            dxValues.append(dx)
+
+            // Step 5: ADX = DX 的 period 日 Wilder's smoothing
+            if dxValues.count >= period {
+                let adxVal: Double
+                if dxValues.count == period {
+                    // 初始 ADX = 前 period 個 DX 的 SMA
+                    adxVal = dxValues.reduce(0, +) / Double(period)
+                } else {
+                    // Wilder's smoothing
+                    let prevADX = result[i - 1]?.adx ?? (dxValues.dropLast().suffix(period).reduce(0, +) / Double(period))
+                    adxVal = (prevADX * Double(period - 1) + dx) / Double(period)
+                }
+                result[i] = ADXResult(adx: adxVal, plusDI: pDI, minusDI: mDI)
+            }
+        }
+
+        return result
+    }
+
+    // MARK: - Volume Profile (Historical Approximation)
+
+    /// 單一價格層級的成交量統計
+    struct VolumeProfileLevel: Sendable {
+        let priceLow: Double   // 此 bin 下限
+        let priceHigh: Double  // 此 bin 上限
+        let priceMid: Double   // 中心價
+        let volume: Double     // 估算量
+        let percentage: Double // 佔總量 %
+    }
+
+    /// Volume Profile 計算結果
+    struct VolumeProfileResult: Sendable {
+        let levels: [VolumeProfileLevel]  // 由低到高排序
+        let pocIndex: Int                 // Point of Control（最大量）索引
+        let pocPrice: Double              // POC 中心價
+        let valueAreaHigh: Double         // Value Area 上限（70%）
+        let valueAreaLow: Double          // Value Area 下限（70%）
+        let totalVolume: Double
+    }
+
+    /// 用日 K 資料模擬 Volume Profile
+    /// 將每根 K 棒的成交量均勻分配到 High~Low 價格範圍覆蓋的 bin 中
+    /// - Parameters:
+    ///   - highs: 最高價序列
+    ///   - lows: 最低價序列
+    ///   - closes: 收盤價序列
+    ///   - volumes: 成交量序列
+    ///   - binCount: 價格分層數（預設 30）
+    ///   - valueAreaPercent: Value Area 佔比（預設 0.70）
+    /// - Returns: VolumeProfileResult，如資料不足則 nil
+    static func volumeProfile(
+        highs: [Double],
+        lows: [Double],
+        closes: [Double],
+        volumes: [Double],
+        binCount: Int = 30,
+        valueAreaPercent: Double = 0.70
+    ) -> VolumeProfileResult? {
+        let count = min(highs.count, lows.count, closes.count, volumes.count)
+        guard count > 1, binCount > 0 else { return nil }
+
+        // 找全域價格範圍
+        let globalHigh = highs[0..<count].max() ?? 0
+        let globalLow = lows[0..<count].min() ?? 0
+        guard globalHigh > globalLow else { return nil }
+
+        let binSize = (globalHigh - globalLow) / Double(binCount)
+        guard binSize > 0 else { return nil }
+
+        // 累計各 bin 的成交量
+        var binVolumes = [Double](repeating: 0, count: binCount)
+
+        for i in 0..<count {
+            let h = highs[i]
+            let l = lows[i]
+            let vol = volumes[i]
+            guard h > l, vol > 0 else { continue }
+
+            // 找出此 K 棒覆蓋的 bin 範圍
+            let startBin = max(0, Int((l - globalLow) / binSize))
+            let endBin = min(binCount - 1, Int((h - globalLow) / binSize))
+            let coveredBins = max(1, endBin - startBin + 1)
+            let volPerBin = vol / Double(coveredBins)
+
+            for b in startBin...endBin {
+                binVolumes[b] += volPerBin
+            }
+        }
+
+        let totalVolume = binVolumes.reduce(0, +)
+        guard totalVolume > 0 else { return nil }
+
+        // 建構 levels
+        var levels: [VolumeProfileLevel] = []
+        for b in 0..<binCount {
+            let pLow = globalLow + Double(b) * binSize
+            let pHigh = pLow + binSize
+            let pMid = (pLow + pHigh) / 2.0
+            levels.append(VolumeProfileLevel(
+                priceLow: pLow,
+                priceHigh: pHigh,
+                priceMid: pMid,
+                volume: binVolumes[b],
+                percentage: binVolumes[b] / totalVolume * 100
+            ))
+        }
+
+        // POC = 最大量 bin
+        let pocIndex = binVolumes.enumerated().max(by: { $0.element < $1.element })?.offset ?? 0
+
+        // Value Area：從 POC 向兩側擴展直到佔比 ≥ 70%
+        let targetVolume = totalVolume * valueAreaPercent
+        var accumulatedVolume = binVolumes[pocIndex]
+        var vaLow = pocIndex
+        var vaHigh = pocIndex
+
+        while accumulatedVolume < targetVolume {
+            let canGoDown = vaLow > 0
+            let canGoUp = vaHigh < binCount - 1
+
+            if !canGoDown && !canGoUp { break }
+
+            let downVol = canGoDown ? binVolumes[vaLow - 1] : -1
+            let upVol = canGoUp ? binVolumes[vaHigh + 1] : -1
+
+            if downVol >= upVol {
+                vaLow -= 1
+                accumulatedVolume += binVolumes[vaLow]
+            } else {
+                vaHigh += 1
+                accumulatedVolume += binVolumes[vaHigh]
+            }
+        }
+
+        return VolumeProfileResult(
+            levels: levels,
+            pocIndex: pocIndex,
+            pocPrice: levels[pocIndex].priceMid,
+            valueAreaHigh: levels[vaHigh].priceHigh,
+            valueAreaLow: levels[vaLow].priceLow,
+            totalVolume: totalVolume
+        )
+    }
+
     // MARK: - Divergence Detection
 
     /// 背離類型
@@ -937,6 +1230,18 @@ enum TechnicalIndicators {
         let candlestickPatterns: [CandlestickSignal]
         /// 市場狀態（多頭/空頭/盤整）
         let regime: MarketRegime
+        /// ATR 值（波動幅度）
+        let atr: Double?
+        /// ATR 佔收盤價百分比（波動率）
+        let atrPercent: Double?
+        /// ADX 趨勢強度
+        let adx: Double?
+        /// +DI（上升方向指標）
+        let plusDI: Double?
+        /// -DI（下降方向指標）
+        let minusDI: Double?
+        /// ADX 信號
+        let adxSignal: ADXSignal?
     }
 
     // MARK: - 均線扣抵值
@@ -1223,7 +1528,9 @@ enum TechnicalIndicators {
                 volumeSignal: nil, volumeRatio: nil,
                 divergences: [],
                 candlestickPatterns: [],
-                regime: .sideways
+                regime: .sideways,
+                atr: nil, atrPercent: nil,
+                adx: nil, plusDI: nil, minusDI: nil, adxSignal: nil
             )
         }
 
@@ -1429,6 +1736,41 @@ enum TechnicalIndicators {
         // ── 市場狀態偵測 ──
         let regime = detectRegime(closes: closes, ma20Values: maLongValues)
 
+        // ── ATR ──
+        let atrValues = atr(highs: highs, lows: lows, closes: closes, period: settings.atrPeriod)
+        let latestATR = atrValues.last ?? nil
+        let latestATRPercent: Double?
+        if let a = latestATR, lastClose > 0 {
+            latestATRPercent = a / lastClose * 100
+        } else {
+            latestATRPercent = nil
+        }
+
+        // ── ADX ──
+        let adxValues = adx(highs: highs, lows: lows, closes: closes, period: settings.adxPeriod)
+        let latestADX = adxValues.last ?? nil
+        let adxSig: ADXSignal?
+        if let adxResult = latestADX {
+            if adxResult.adx >= settings.adxStrongThreshold {
+                // ADX 趨勢方向判斷
+                if adxValues.count >= 2,
+                   let prev = adxValues[adxValues.count - 2] {
+                    adxSig = adxResult.adx > prev.adx ? .trendStrengthening : .strongTrend
+                } else {
+                    adxSig = .strongTrend
+                }
+            } else {
+                if adxValues.count >= 2,
+                   let prev = adxValues[adxValues.count - 2] {
+                    adxSig = adxResult.adx < prev.adx ? .trendWeakening : .weakTrend
+                } else {
+                    adxSig = .weakTrend
+                }
+            }
+        } else {
+            adxSig = nil
+        }
+
         return SignalSummary(
             ma5Position: ma5Pos,
             ma20Position: ma20Pos,
@@ -1453,7 +1795,13 @@ enum TechnicalIndicators {
             volumeRatio: volRatio,
             divergences: divergences,
             candlestickPatterns: candlestickPatterns,
-            regime: regime
+            regime: regime,
+            atr: latestATR,
+            atrPercent: latestATRPercent,
+            adx: latestADX?.adx,
+            plusDI: latestADX?.plusDI,
+            minusDI: latestADX?.minusDI,
+            adxSignal: adxSig
         )
     }
 

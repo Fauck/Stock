@@ -26,6 +26,7 @@ final class BuyAnalysisViewModel {
     var institutionalSummary: StockService.InstitutionalSummary?
 
     var maDeductions: [TechnicalIndicators.MADeductionInfo] = []
+    var volumeProfile: TechnicalIndicators.VolumeProfileResult?
 
     var isLoading: Bool = false
     var errorMessage: String?
@@ -144,7 +145,9 @@ final class BuyAnalysisViewModel {
                 volumeRatio: signal.volumeRatio,
                 divergences: signal.divergences,
                 candlestickPatterns: patterns,  // 使用完整型態列表
-                regime: signal.regime
+                regime: signal.regime,
+                atr: signal.atr, atrPercent: signal.atrPercent,
+                adx: signal.adx, plusDI: signal.plusDI, minusDI: signal.minusDI, adxSignal: signal.adxSignal
             )
 
             recommendation = TechnicalIndicators.computeBuyRecommendation(
@@ -163,6 +166,14 @@ final class BuyAnalysisViewModel {
             maDeductions = TechnicalIndicators.computeMADeductions(
                 closes: closes,
                 currentPrice: currentPrice
+            )
+
+            // Volume Profile
+            volumeProfile = TechnicalIndicators.volumeProfile(
+                highs: highs,
+                lows: lows,
+                closes: closes,
+                volumes: volumes.map { Double($0) }
             )
 
             hasResult = true

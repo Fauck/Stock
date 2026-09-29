@@ -179,6 +179,17 @@ struct BuyAnalysisView: View {
                     }
                 }
 
+                if let vp = vm.volumeProfile {
+                    collapsibleCard(
+                        id: "volumeProfile",
+                        icon: "chart.bar.xaxis",
+                        title: "成交量分佈",
+                        summary: vpSummaryText(vp)
+                    ) {
+                        vpContent(vp)
+                    }
+                }
+
                 // 免責聲明
                 HStack(spacing: 4) {
                     Image(systemName: "info.circle")
@@ -296,6 +307,130 @@ struct BuyAnalysisView: View {
         let position = (vm.currentPrice - low) / (high - low)
         let pct = min(100, max(0, position * 100))
         return "目前位於 \(String(format: "%.0f", pct))% 位置"
+    }
+
+    // MARK: - Volume Profile Helpers
+
+    private func vpSummaryText(_ vp: TechnicalIndicators.VolumeProfileResult) -> String {
+        let price = vm.currentPrice
+        let deviation = (price - vp.pocPrice) / vp.pocPrice * 100
+        let pocText = "主力成本 \(formatPrice(vp.pocPrice))"
+        if price > vp.valueAreaHigh {
+            return "\(pocText)（\(String(format: "%+.1f%%", deviation))）· 突破密集區上緣"
+        } else if price < vp.valueAreaLow {
+            return "\(pocText)（\(String(format: "%+.1f%%", deviation))）· 跌破密集區下緣"
+        } else {
+            return "\(pocText)（\(String(format: "%+.1f%%", deviation))）· 位於密集區間"
+        }
+    }
+
+    @ViewBuilder
+    private func vpContent(_ vp: TechnicalIndicators.VolumeProfileResult) -> some View {
+        let price = vm.currentPrice
+        let deviation = (price - vp.pocPrice) / vp.pocPrice * 100
+        let maxVol = vp.levels.map(\.volume).max() ?? 1
+
+        VStack(alignment: .leading, spacing: 8) {
+            // 摘要提示
+            VStack(alignment: .leading, spacing: 4) {
+                // POC 行
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(AppColor.primary)
+                        .frame(width: 5, height: 5)
+                    Text("主力成本")
+                        .font(.warmMicro())
+                        .foregroundStyle(AppColor.textSecondary)
+                    Text(formatPrice(vp.pocPrice))
+                        .font(.warmMicro(.semibold))
+                        .foregroundStyle(AppColor.textMain)
+                    Text(String(format: "%+.1f%%", deviation))
+                        .font(.warmMicro(.semibold))
+                        .foregroundStyle(deviation >= 0 ? AppColor.softUp : AppColor.softDown)
+
+                    Spacer()
+
+                    // POC 提示
+                    if abs(deviation) > 5 {
+                        Text(deviation > 0 ? "偏離成本區，注意回測" : "低於成本區，觀察支撐")
+                            .font(.warmMicro())
+                            .foregroundStyle(AppColor.softDown)
+                    } else {
+                        Text("接近主力成本區")
+                            .font(.warmMicro())
+                            .foregroundStyle(AppColor.softUp)
+                    }
+                }
+
+                // VA 行
+                HStack(spacing: 4) {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(AppColor.primary.opacity(0.45))
+                        .frame(width: 5, height: 5)
+                    Text("密集區")
+                        .font(.warmMicro())
+                        .foregroundStyle(AppColor.textSecondary)
+                    Text("\(formatPrice(vp.valueAreaLow)) – \(formatPrice(vp.valueAreaHigh))")
+                        .font(.warmMicro(.semibold))
+                        .foregroundStyle(AppColor.textMain)
+
+                    Spacer()
+
+                    if price > vp.valueAreaHigh {
+                        Text("突破上緣，壓力轉支撐")
+                            .font(.warmMicro())
+                            .foregroundStyle(AppColor.softUp)
+                    } else if price < vp.valueAreaLow {
+                        Text("跌破下緣，留意支撐")
+                            .font(.warmMicro())
+                            .foregroundStyle(AppColor.softDown)
+                    } else {
+                        Text("位於密集成交區間")
+                            .font(.warmMicro())
+                            .foregroundStyle(AppColor.textSecondary)
+                    }
+                }
+            }
+            .padding(8)
+            .background(AppColor.background.opacity(0.6))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.pill, style: .continuous))
+
+            // 橫向長條圖
+            VStack(spacing: 1) {
+                ForEach(Array(vp.levels.enumerated().reversed()), id: \.offset) { index, level in
+                    let isPOC = index == vp.pocIndex
+                    let isVA = level.priceMid >= vp.valueAreaLow && level.priceMid <= vp.valueAreaHigh
+                    let barRatio = maxVol > 0 ? CGFloat(level.volume / maxVol) : 0
+
+                    HStack(spacing: 4) {
+                        Text(formatPrice(level.priceMid))
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .foregroundStyle(isPOC ? AppColor.primary : AppColor.textSecondary)
+                            .frame(width: 40, alignment: .trailing)
+
+                        GeometryReader { geo in
+                            RoundedRectangle(cornerRadius: 1.5)
+                                .fill(
+                                    isPOC ? AppColor.primary :
+                                    isVA ? AppColor.primary.opacity(0.45) :
+                                    AppColor.textSecondary.opacity(0.2)
+                                )
+                                .frame(width: max(geo.size.width * barRatio, 2), height: geo.size.height)
+                        }
+
+                        if isPOC || level.percentage > 5 {
+                            Text(String(format: "%.1f%%", level.percentage))
+                                .font(.system(size: 7, weight: .medium, design: .monospaced))
+                                .foregroundStyle(isPOC ? AppColor.primary : AppColor.textSecondary)
+                                .frame(width: 30, alignment: .leading)
+                        } else {
+                            Color.clear.frame(width: 30)
+                        }
+                    }
+                    .frame(height: isPOC ? 10 : 8)
+                }
+            }
+        }
     }
 
     // MARK: - Price Header
