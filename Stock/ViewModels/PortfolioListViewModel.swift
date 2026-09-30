@@ -7,40 +7,43 @@ final class PortfolioListViewModel {
     // MARK: - Data (bridged from @Query)
     var investments: [Investment] = []
 
-    // MARK: - State
-    var currentPrices: [String: String] = [:]
-    /// 昨日收盤價 [ticker: previousClose]
-    var previousClosePrices: [String: Double] = [:]
-    /// 當日漲跌點數 [ticker: change]
-    var dailyChangePoints: [String: Double] = [:]
-    /// 當日漲跌百分比 [ticker: changePercent]
-    var dailyChangePercents: [String: Double] = [:]
+    // MARK: - Aggregated State
+
+    /// 價格相關狀態
+    struct PriceState {
+        var currentPrices: [String: String] = [:]
+        var previousClosePrices: [String: Double] = [:]
+        var dailyChangePoints: [String: Double] = [:]
+        var dailyChangePercents: [String: Double] = [:]
+        var isFetching: Bool = false
+    }
+
+    /// 技術指標相關狀態
+    struct TechnicalState {
+        var signals: [String: TechnicalIndicators.SignalSummary] = [:]
+        var highSinceBuy: [String: Double] = [:]
+        var sparklineData: [String: [Double]] = [:]
+        var maDeductions: [String: [TechnicalIndicators.MADeductionInfo]] = [:]
+        var isFetching: Bool = false
+    }
+
+    /// 市場資料相關狀態
+    struct MarketDataState {
+        var weekStats: [String: WeekStats] = [:]
+        var institutionalData: [String: StockService.InstitutionalSummary] = [:]
+        var marginData: [String: StockService.MarginTradingSummary] = [:]
+        var isFetchingWeekStats: Bool = false
+        var isFetchingInstitutional: Bool = false
+        var isFetchingMargin: Bool = false
+    }
+
+    var price = PriceState()
+    var technical = TechnicalState()
+    var market = MarketDataState()
+
+    // MARK: - Other State
+
     var expandedTicker: String?
-
-    /// 技術指標信號 [ticker: SignalSummary]
-    var technicalSignals: [String: TechnicalIndicators.SignalSummary] = [:]
-    /// 是否正在載入技術指標
-    var isFetchingSignals: Bool = false
-
-    var weekStats: [String: WeekStats] = [:]
-    var isFetchingWeekStats: Bool = false
-
-    /// 買入後最高價 [ticker: highestPrice]（用於移動停利）
-    var highSinceBuy: [String: Double] = [:]
-
-    /// 最近 7 個交易日收盤價 [ticker: [Double]]（Sparkline 用）
-    var sparklineData: [String: [Double]] = [:]
-
-    /// 均線扣抵值分析 [ticker: [MADeductionInfo]]
-    var maDeductions: [String: [TechnicalIndicators.MADeductionInfo]] = [:]
-
-    /// 三大法人買賣超 [ticker: InstitutionalSummary]
-    var institutionalData: [String: StockService.InstitutionalSummary] = [:]
-    var isFetchingInstitutional: Bool = false
-
-    /// 融資融券 [ticker: MarginTradingSummary]
-    var marginData: [String: StockService.MarginTradingSummary] = [:]
-    var isFetchingMargin: Bool = false
 
     /// 目標價 / 停損價（從交易日誌取得）[ticker: JournalTarget]
     var journalTargets: [String: JournalTarget] = [:]
@@ -50,9 +53,6 @@ final class PortfolioListViewModel {
 
     /// API 查到的中文名稱快取 [symbol: name]
     var stockNames: [String: String] = [:]
-
-    /// 是否正在批次載入即時價格
-    var isFetchingPrices: Bool = false
 
     // 單筆賣出
     var selectedInvestment: Investment?
@@ -105,7 +105,7 @@ final class PortfolioListViewModel {
 
     var totalMarketValue: Double {
         groups.reduce(0.0) { sum, group in
-            guard let priceStr = currentPrices[group.ticker],
+            guard let priceStr = price.currentPrices[group.ticker],
                   let price = Double(priceStr), price > 0 else { return sum }
             return sum + price * group.totalQuantity
         }
@@ -113,7 +113,7 @@ final class PortfolioListViewModel {
 
     var hasAnyPrice: Bool {
         groups.contains { group in
-            guard let priceStr = currentPrices[group.ticker],
+            guard let priceStr = price.currentPrices[group.ticker],
                   let price = Double(priceStr) else { return false }
             return price > 0
         }
@@ -123,7 +123,7 @@ final class PortfolioListViewModel {
     var totalPL: Double {
         let fees = TradingFeeSettings.load()
         return groups.reduce(0.0) { sum, group in
-            guard let priceStr = currentPrices[group.ticker],
+            guard let priceStr = price.currentPrices[group.ticker],
                   let price = Double(priceStr), price > 0 else { return sum }
             return sum + group.unrealizedProfitLoss(currentPrice: price, fees: fees)
         }
@@ -147,21 +147,21 @@ final class PortfolioListViewModel {
         var total: Double = 0
         var hasAny = false
         for group in groups {
-            guard let priceStr = currentPrices[group.ticker],
-                  let price = Double(priceStr), price > 0,
-                  let prevClose = previousClosePrices[group.ticker], prevClose > 0 else { continue }
+            guard let priceStr = price.currentPrices[group.ticker],
+                  let currentPrice = Double(priceStr), currentPrice > 0,
+                  let prevClose = price.previousClosePrices[group.ticker], prevClose > 0 else { continue }
             hasAny = true
-            total += (price - prevClose) * group.totalQuantity
+            total += (currentPrice - prevClose) * group.totalQuantity
         }
         return hasAny ? total : nil
     }
 
     /// 單一標的本日損益增減
     func dailyPLChange(for ticker: String, quantity: Double) -> Double? {
-        guard let priceStr = currentPrices[ticker],
-              let price = Double(priceStr), price > 0,
-              let prevClose = previousClosePrices[ticker], prevClose > 0 else { return nil }
-        return (price - prevClose) * quantity
+        guard let priceStr = price.currentPrices[ticker],
+              let currentPrice = Double(priceStr), currentPrice > 0,
+              let prevClose = price.previousClosePrices[ticker], prevClose > 0 else { return nil }
+        return (currentPrice - prevClose) * quantity
     }
 
     // MARK: - Sell Recommendation
@@ -169,25 +169,25 @@ final class PortfolioListViewModel {
     /// 計算單一標的的賣出建議（受設定開關控制）
     func sellRecommendation(for ticker: String, avgCost: Double) -> TechnicalIndicators.SellRecommendation? {
         guard TradingFeeSettings.load().sellRecommendationEnabled else { return nil }
-        guard let signal = technicalSignals[ticker] else { return nil }
+        guard let signal = technical.signals[ticker] else { return nil }
 
         // 計算移動停利狀態
-        let price = currentPrice(for: ticker)
-        let high = highSinceBuy[ticker]
+        let currentPriceVal = currentPrice(for: ticker)
+        let high = technical.highSinceBuy[ticker]
         var trailingStopTriggered = false
         var nearTrailingStop = false
 
-        if let price, let high, high > 0 {
+        if let currentPriceVal, let high, high > 0 {
             let pct = TradingFeeSettings.load().trailingStopPct
             let rawStop = high * (1 - pct / 100)
             let stopPrice = max(rawStop, avgCost)
-            trailingStopTriggered = price <= stopPrice
-            nearTrailingStop = !trailingStopTriggered && price <= stopPrice * 1.03
+            trailingStopTriggered = currentPriceVal <= stopPrice
+            nearTrailingStop = !trailingStopTriggered && currentPriceVal <= stopPrice * 1.03
         }
 
         // 法人連續天數
-        let inst = institutionalData[ticker]
-        let margin = marginData[ticker]
+        let inst = market.institutionalData[ticker]
+        let margin = market.marginData[ticker]
 
         return TechnicalIndicators.computeSellRecommendation(
             signal: signal,
@@ -246,16 +246,16 @@ final class PortfolioListViewModel {
     }
 
     func currentPrice(for ticker: String) -> Double? {
-        guard let str = currentPrices[ticker], let p = Double(str), p > 0 else { return nil }
+        guard let str = price.currentPrices[ticker], let p = Double(str), p > 0 else { return nil }
         return p
     }
 
     func priceBinding(for ticker: String) -> String {
-        currentPrices[ticker] ?? ""
+        price.currentPrices[ticker] ?? ""
     }
 
     func setPrice(_ value: String, for ticker: String) {
-        currentPrices[ticker] = value
+        price.currentPrices[ticker] = value
     }
 
     /// 取得股票的顯示名稱：優先 API 名稱 → 本地字典 → 原始代號
@@ -277,7 +277,7 @@ final class PortfolioListViewModel {
 
         fetchTask?.cancel()
         fetchTask = Task { @MainActor in
-            isFetchingPrices = true
+            price.isFetching = true
 
             // 將 ticker 解析為 API 可查詢的代號
             // 例如：使用者之前可能存了 "台積電" 而非 "2330"
@@ -295,22 +295,22 @@ final class PortfolioListViewModel {
             // 將結果映射回原始 ticker
             for (ticker, apiSymbol) in tickerToSymbol {
                 if let result = results[apiSymbol] {
-                    currentPrices[ticker] = String(format: "%.2f", result.lastPrice)
+                    price.currentPrices[ticker] = String(format: "%.2f", result.lastPrice)
                     if let prevClose = result.previousClose, prevClose > 0 {
-                        previousClosePrices[ticker] = prevClose
+                        price.previousClosePrices[ticker] = prevClose
                     }
                     if let change = result.change {
-                        dailyChangePoints[ticker] = change
+                        price.dailyChangePoints[ticker] = change
                     }
                     if let changePct = result.changePercent {
-                        dailyChangePercents[ticker] = changePct
+                        price.dailyChangePercents[ticker] = changePct
                     }
                     let cleanName = result.name.replacingOccurrences(of: "*", with: "")
                     stockNames[ticker] = cleanName
                     StockMapping.cache(symbol: apiSymbol, name: result.name)
                 }
             }
-            isFetchingPrices = false
+            price.isFetching = false
         }
     }
 
@@ -348,7 +348,7 @@ final class PortfolioListViewModel {
             // 同日重新整理 + 無新 ticker → 跳過 Phase 2（只刷即時價）
             if forceRefresh && alreadyLoadedToday {
                 let tickers = Set(groups.map(\.ticker))
-                let hasCachedSignals = tickers.allSatisfy { technicalSignals[$0] != nil }
+                let hasCachedSignals = tickers.allSatisfy { technical.signals[$0] != nil }
                 if hasCachedSignals {
                     return
                 }
@@ -371,7 +371,7 @@ final class PortfolioListViewModel {
         let tickers = groups.map(\.ticker)
         guard !tickers.isEmpty else { return }
 
-        isFetchingPrices = true
+        price.isFetching = true
 
         var tickerToSymbol: [String: String] = [:]
         for ticker in tickers {
@@ -386,22 +386,22 @@ final class PortfolioListViewModel {
 
         for (ticker, apiSymbol) in tickerToSymbol {
             if let result = results[apiSymbol] {
-                currentPrices[ticker] = String(format: "%.2f", result.lastPrice)
+                price.currentPrices[ticker] = String(format: "%.2f", result.lastPrice)
                 if let prevClose = result.previousClose, prevClose > 0 {
-                    previousClosePrices[ticker] = prevClose
+                    price.previousClosePrices[ticker] = prevClose
                 }
                 if let change = result.change {
-                    dailyChangePoints[ticker] = change
+                    price.dailyChangePoints[ticker] = change
                 }
                 if let changePct = result.changePercent {
-                    dailyChangePercents[ticker] = changePct
+                    price.dailyChangePercents[ticker] = changePct
                 }
                 let cleanName = result.name.replacingOccurrences(of: "*", with: "")
                 stockNames[ticker] = cleanName
                 StockMapping.cache(symbol: apiSymbol, name: result.name)
             }
         }
-        isFetchingPrices = false
+        price.isFetching = false
     }
 
     /// 技術指標載入（帶 K 線當日快取）
@@ -433,7 +433,7 @@ final class PortfolioListViewModel {
         let tickersToFetch = forceRefresh ? tickers : missingTickers
         guard !tickersToFetch.isEmpty else { return }
 
-        isFetchingSignals = true
+        technical.isFetching = true
 
         let today = Date()
         let defaultFromDate = Calendar.current.date(byAdding: .day, value: -60, to: today) ?? today
@@ -470,7 +470,7 @@ final class PortfolioListViewModel {
 
         // 從合併結果計算信號
         applySignalsFromCandles(mergedCache, tickers: tickers, settings: settings)
-        isFetchingSignals = false
+        technical.isFetching = false
     }
 
     /// 從 K 線資料計算技術指標 + 買入後最高價
@@ -496,7 +496,7 @@ final class PortfolioListViewModel {
                 closes: candle.closes, highs: candle.highs, lows: candle.lows,
                 volumes: candle.volumes, settings: settings
             )
-            technicalSignals[ticker] = summary
+            technical.signals[ticker] = summary
 
             if let buyDateStr = earliestBuyDates[ticker] {
                 var maxHigh: Double = 0
@@ -504,23 +504,23 @@ final class PortfolioListViewModel {
                     maxHigh = max(maxHigh, candle.highs[i])
                 }
                 // 含今日即時價格（K 線可能尚未包含今天）
-                if let price = currentPrice(for: ticker) {
-                    maxHigh = max(maxHigh, price)
+                if let currentPriceVal = currentPrice(for: ticker) {
+                    maxHigh = max(maxHigh, currentPriceVal)
                 }
                 if maxHigh > 0 {
-                    highSinceBuy[ticker] = maxHigh
+                    technical.highSinceBuy[ticker] = maxHigh
                 }
             }
 
             // Sparkline：取最近 7 個交易日收盤價
             let closes = candle.closes
-            sparklineData[ticker] = Array(closes.suffix(7))
+            technical.sparklineData[ticker] = Array(closes.suffix(7))
 
             // 均線扣抵值
-            if let price = currentPrice(for: ticker) {
-                maDeductions[ticker] = TechnicalIndicators.computeMADeductions(
+            if let currentPriceVal = currentPrice(for: ticker) {
+                technical.maDeductions[ticker] = TechnicalIndicators.computeMADeductions(
                     closes: closes,
-                    currentPrice: price
+                    currentPrice: currentPriceVal
                 )
             }
         }
@@ -542,7 +542,7 @@ final class PortfolioListViewModel {
            let cached = try? JSONDecoder().decode([String: CodableWeekStats].self, from: data) {
             existingCache = cached
             for (ticker, stats) in cached {
-                weekStats[ticker] = WeekStats(high52w: stats.high, low52w: stats.low)
+                market.weekStats[ticker] = WeekStats(high52w: stats.high, low52w: stats.low)
             }
         }
 
@@ -556,7 +556,7 @@ final class PortfolioListViewModel {
         let tickersToFetch = forceRefresh ? tickers : missingTickers
         guard !tickersToFetch.isEmpty else { return }
 
-        isFetchingWeekStats = true
+        market.isFetchingWeekStats = true
 
         var tickerSymbols: [(String, String)] = []
         for ticker in tickersToFetch {
@@ -593,7 +593,7 @@ final class PortfolioListViewModel {
         // 合併快取 + 新結果
         var mergedCache = existingCache
         for result in results {
-            weekStats[result.ticker] = WeekStats(high52w: result.high52w, low52w: result.low52w)
+            market.weekStats[result.ticker] = WeekStats(high52w: result.high52w, low52w: result.low52w)
             mergedCache[result.ticker] = CodableWeekStats(high: result.high52w, low: result.low52w)
         }
 
@@ -604,7 +604,7 @@ final class PortfolioListViewModel {
         }
 
         guard !Task.isCancelled else { return }
-        isFetchingWeekStats = false
+        market.isFetchingWeekStats = false
     }
 
     /// 法人買賣超（帶當日快取 + 排除週末，新 ticker 自動補抓）
@@ -624,7 +624,7 @@ final class PortfolioListViewModel {
            let cached = try? JSONDecoder().decode([String: CodableInstitutionalSummary].self, from: data) {
             existingCache = cached
             for (ticker, summary) in cached {
-                institutionalData[ticker] = summary.toSummary()
+                market.institutionalData[ticker] = summary.toSummary()
             }
         }
 
@@ -636,7 +636,7 @@ final class PortfolioListViewModel {
         }
 
         // 法人 API 一次回傳全市場，重抓後可涵蓋所有 ticker
-        isFetchingInstitutional = true
+        market.isFetchingInstitutional = true
 
         var tickerToCode: [String: String] = [:]
         for ticker in tickers {
@@ -725,7 +725,7 @@ final class PortfolioListViewModel {
             }
             if !days.isEmpty {
                 let summary = StockService.InstitutionalSummary(days: days)
-                institutionalData[ticker] = summary
+                market.institutionalData[ticker] = summary
                 mergedCache[ticker] = CodableInstitutionalSummary(from: summary)
             }
         }
@@ -737,7 +737,7 @@ final class PortfolioListViewModel {
         }
 
         guard !Task.isCancelled else { return }
-        isFetchingInstitutional = false
+        market.isFetchingInstitutional = false
     }
 
     /// 融資融券（帶當日快取 + 排除週末，新 ticker 自動補抓）
@@ -756,7 +756,7 @@ final class PortfolioListViewModel {
            let cached = try? JSONDecoder().decode([String: CodableMarginSummary].self, from: data) {
             existingCache = cached
             for (ticker, summary) in cached {
-                marginData[ticker] = summary.toSummary()
+                market.marginData[ticker] = summary.toSummary()
             }
         }
 
@@ -767,7 +767,7 @@ final class PortfolioListViewModel {
             return
         }
 
-        isFetchingMargin = true
+        market.isFetchingMargin = true
 
         var tickerToCode: [String: String] = [:]
         for ticker in tickers {
@@ -852,7 +852,7 @@ final class PortfolioListViewModel {
             }
             if !days.isEmpty {
                 let summary = StockService.MarginTradingSummary(days: days)
-                marginData[ticker] = summary
+                market.marginData[ticker] = summary
                 mergedCache[ticker] = CodableMarginSummary(from: summary)
             }
         }
@@ -864,7 +864,7 @@ final class PortfolioListViewModel {
         }
 
         guard !Task.isCancelled else { return }
-        isFetchingMargin = false
+        market.isFetchingMargin = false
     }
 
     // MARK: - Actions

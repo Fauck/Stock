@@ -52,16 +52,16 @@ struct PortfolioListView: View {
                 if let group = vm.selectedGroupForDetail {
                     StockDetailSheetView(
                         group: group,
-                        signal: vm.technicalSignals[group.ticker],
-                        weekStats: vm.weekStats[group.ticker],
+                        signal: vm.technical.signals[group.ticker],
+                        weekStats: vm.market.weekStats[group.ticker],
                         currentPrice: vm.currentPrice(for: group.ticker),
                         displayName: vm.displayName(for: group.ticker),
-                        highSinceBuy: vm.highSinceBuy[group.ticker],
-                        institutionalData: vm.institutionalData[group.ticker],
-                        marginData: vm.marginData[group.ticker],
+                        highSinceBuy: vm.technical.highSinceBuy[group.ticker],
+                        institutionalData: vm.market.institutionalData[group.ticker],
+                        marginData: vm.market.marginData[group.ticker],
                         sellRecommendation: vm.sellRecommendation(for: group.ticker, avgCost: group.weightedAverageCost),
                         journalTarget: vm.journalTargets[group.ticker],
-                        maDeductions: vm.maDeductions[group.ticker] ?? []
+                        maDeductions: vm.technical.maDeductions[group.ticker] ?? []
                     )
                 }
             }
@@ -154,7 +154,7 @@ struct PortfolioListView: View {
     // MARK: - 總覽卡片
 
     private var totalSummaryCard: some View {
-        let isLoading = vm.isFetchingPrices || vm.isFetchingSignals || vm.isFetchingWeekStats || vm.isFetchingInstitutional
+        let isLoading = vm.price.isFetching || vm.technical.isFetching || vm.market.isFetchingWeekStats || vm.market.isFetchingInstitutional
 
         return VStack(spacing: 14) {
             // ── 標題列 ──
@@ -332,7 +332,7 @@ struct PortfolioListView: View {
                         Spacer(minLength: AppSpacing.m)
 
                         // 7 日迷你走勢線
-                        if let sparkData = vm.sparklineData[group.ticker],
+                        if let sparkData = vm.technical.sparklineData[group.ticker],
                            sparkData.count >= 2 {
                             SparklineView(data: sparkData)
                         }
@@ -378,8 +378,8 @@ struct PortfolioListView: View {
                                         .foregroundStyle(AppColor.textSecondary)
                                 }
 
-                                if let change = vm.dailyChangePoints[group.ticker],
-                                   let changePct = vm.dailyChangePercents[group.ticker] {
+                                if let change = vm.price.dailyChangePoints[group.ticker],
+                                   let changePct = vm.price.dailyChangePercents[group.ticker] {
                                     HStack(spacing: 2) {
                                         Image(systemName: change >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
                                             .font(.system(size: 7))
@@ -413,7 +413,7 @@ struct PortfolioListView: View {
                     }
 
                     // 技術信號標籤列（僅警示型 pills）
-                    if let signal = vm.technicalSignals[group.ticker] {
+                    if let signal = vm.technical.signals[group.ticker] {
                         FlowLayout(spacing: AppSpacing.xs) {
                             compactSignalBadges(signal, ticker: group.ticker, avgCost: group.weightedAverageCost)
                         }
@@ -480,7 +480,7 @@ struct PortfolioListView: View {
 
                         // ━━ 風控狀態 ━━
                         if let price = currentPrice {
-                            let hasRiskData = (vm.highSinceBuy[group.ticker] ?? 0) > 0 || vm.journalTargets[group.ticker] != nil
+                            let hasRiskData = (vm.technical.highSinceBuy[group.ticker] ?? 0) > 0 || vm.journalTargets[group.ticker] != nil
                             if hasRiskData {
                                 sectionHeader("風控狀態")
                                 riskControlSection(ticker: group.ticker, currentPrice: price, avgCost: group.weightedAverageCost)
@@ -488,24 +488,24 @@ struct PortfolioListView: View {
                         }
 
                         // ━━ 市場資訊（可收合）━━
-                        let hasInst = vm.institutionalData[group.ticker] != nil
-                        let hasSignal = vm.technicalSignals[group.ticker] != nil
-                        let hasMargin = vm.marginData[group.ticker] != nil
+                        let hasInst = vm.market.institutionalData[group.ticker] != nil
+                        let hasSignal = vm.technical.signals[group.ticker] != nil
+                        let hasMargin = vm.market.marginData[group.ticker] != nil
                         if hasInst || hasSignal || hasMargin {
                             collapsibleSectionHeader("市場資訊", ticker: group.ticker)
 
                             if marketInfoExpanded.contains(group.ticker) {
-                                if let inst = vm.institutionalData[group.ticker] {
+                                if let inst = vm.market.institutionalData[group.ticker] {
                                     institutionalBanner(inst)
                                         .padding(.horizontal, AppSpacing.lg)
                                 }
 
-                                if let margin = vm.marginData[group.ticker] {
+                                if let margin = vm.market.marginData[group.ticker] {
                                     marginBanner(margin)
                                         .padding(.horizontal, AppSpacing.lg)
                                 }
 
-                                if let signal = vm.technicalSignals[group.ticker] {
+                                if let signal = vm.technical.signals[group.ticker] {
                                     expandedSignalSummary(signal, ticker: group.ticker)
                                         .padding(.horizontal, AppSpacing.lg)
                                 }
@@ -640,13 +640,13 @@ struct PortfolioListView: View {
 
     @ViewBuilder
     private func riskControlSection(ticker: String, currentPrice: Double, avgCost: Double) -> some View {
-        let hasTrailingStop = vm.highSinceBuy[ticker] != nil && (vm.highSinceBuy[ticker] ?? 0) > 0
+        let hasTrailingStop = vm.technical.highSinceBuy[ticker] != nil && (vm.technical.highSinceBuy[ticker] ?? 0) > 0
         let hasTargets = vm.journalTargets[ticker] != nil
 
         if hasTrailingStop || hasTargets {
             VStack(alignment: .leading, spacing: 6) {
                 // 移動停利
-                if let high = vm.highSinceBuy[ticker], high > 0 {
+                if let high = vm.technical.highSinceBuy[ticker], high > 0 {
                     let pct = TradingFeeSettings.load().trailingStopPct
                     let rawStop = high * (1 - pct / 100)
                     let stopPrice = max(rawStop, avgCost)
@@ -816,7 +816,7 @@ struct PortfolioListView: View {
         }
         // 移動停利跌破 / 接近
         if let price = vm.currentPrice(for: ticker),
-           let high = vm.highSinceBuy[ticker], high > 0 {
+           let high = vm.technical.highSinceBuy[ticker], high > 0 {
             let pct = TradingFeeSettings.load().trailingStopPct
             let rawStop = high * (1 - pct / 100)
             let stopPrice = max(rawStop, avgCost)
@@ -869,7 +869,7 @@ struct PortfolioListView: View {
                 signalPill(label, color: rsiSig == .overbought ? AppColor.softUp : AppColor.softDown)
             }
             // 52 週位置警示
-            if let stats = vm.weekStats[ticker],
+            if let stats = vm.market.weekStats[ticker],
                let price = vm.currentPrice(for: ticker),
                stats.high52w > stats.low52w {
                 let pct = (price - stats.low52w) / (stats.high52w - stats.low52w)
@@ -901,7 +901,7 @@ struct PortfolioListView: View {
                     .font(.warmCaption())
                     .foregroundStyle(AppColor.textSecondary)
                 Spacer()
-                if vm.isFetchingSignals {
+                if vm.technical.isFetching {
                     ProgressView()
                         .scaleEffect(0.6)
                 }
@@ -977,7 +977,7 @@ struct PortfolioListView: View {
                     .font(.warmCaption())
                     .foregroundStyle(AppColor.textSecondary)
                 Spacer()
-                if vm.isFetchingWeekStats {
+                if vm.market.isFetchingWeekStats {
                     ProgressView()
                         .scaleEffect(0.6)
                 }
@@ -1080,7 +1080,7 @@ struct PortfolioListView: View {
                     .font(.warmCaption2())
                     .foregroundStyle(AppColor.textSecondary)
                 Spacer()
-                if vm.isFetchingInstitutional {
+                if vm.market.isFetchingInstitutional {
                     ProgressView().scaleEffect(0.5)
                 }
             }
@@ -1130,7 +1130,7 @@ struct PortfolioListView: View {
                     .font(.warmCaption2())
                     .foregroundStyle(AppColor.textSecondary)
                 Spacer()
-                if vm.isFetchingMargin {
+                if vm.market.isFetchingMargin {
                     ProgressView().scaleEffect(0.5)
                 }
             }

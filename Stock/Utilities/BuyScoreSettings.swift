@@ -83,6 +83,9 @@ struct BuyScoreSettings: Codable, Equatable, Sendable {
     var trendGroupCap: Int = 15       // 趨勢組 (MA cross + MACD cross + DIF) ±上限
     var momentumGroupCap: Int = 12    // 動量組 (KDJ + RSI) ±上限
 
+    // MARK: - 版本（Codable 向後相容）
+    var version: Int = 1
+
     // MARK: - Persistence
 
     static let defaults = BuyScoreSettings()
@@ -91,10 +94,17 @@ struct BuyScoreSettings: Codable, Equatable, Sendable {
 
     /// 從 UserDefaults 讀取，找不到則回傳預設值
     static func load() -> BuyScoreSettings {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let settings = try? JSONDecoder().decode(BuyScoreSettings.self, from: data)
-        else { return .defaults }
-        return settings
+        guard let data = UserDefaults.standard.data(forKey: storageKey) else {
+            return .defaults
+        }
+        do {
+            return try JSONDecoder().decode(BuyScoreSettings.self, from: data).clamped()
+        } catch {
+            #if DEBUG
+            print("[BuyScoreSettings] 解碼失敗，使用預設值: \(error)")
+            #endif
+            return .defaults
+        }
     }
 
     /// 儲存至 UserDefaults
@@ -107,5 +117,69 @@ struct BuyScoreSettings: Codable, Equatable, Sendable {
     /// 恢復預設（移除儲存的設定）
     static func resetToDefaults() {
         UserDefaults.standard.removeObject(forKey: storageKey)
+    }
+
+    /// 將所有數值夾到合理範圍
+    func clamped() -> BuyScoreSettings {
+        var s = self
+        // 各分數項目 ±30
+        func clampPts(_ v: Int) -> Int { max(-30, min(v, 30)) }
+        s.maGoldenCrossPoints = clampPts(s.maGoldenCrossPoints)
+        s.maDeathCrossPoints = clampPts(s.maDeathCrossPoints)
+        s.aboveMA5Points = clampPts(s.aboveMA5Points)
+        s.belowMA5Points = clampPts(s.belowMA5Points)
+        s.aboveMA20Points = clampPts(s.aboveMA20Points)
+        s.belowMA20Points = clampPts(s.belowMA20Points)
+        s.macdGoldenCrossPoints = clampPts(s.macdGoldenCrossPoints)
+        s.macdDeathCrossPoints = clampPts(s.macdDeathCrossPoints)
+        s.macdPositivePoints = clampPts(s.macdPositivePoints)
+        s.macdNegativePoints = clampPts(s.macdNegativePoints)
+        s.kdjGoldenCrossPoints = clampPts(s.kdjGoldenCrossPoints)
+        s.kdjDeathCrossPoints = clampPts(s.kdjDeathCrossPoints)
+        s.kdjOversoldPoints = clampPts(s.kdjOversoldPoints)
+        s.kdjOverboughtPoints = clampPts(s.kdjOverboughtPoints)
+        s.rsiOversoldPoints = clampPts(s.rsiOversoldPoints)
+        s.rsiOverboughtPoints = clampPts(s.rsiOverboughtPoints)
+        s.bollingerLowerPoints = clampPts(s.bollingerLowerPoints)
+        s.bollingerUpperPoints = clampPts(s.bollingerUpperPoints)
+        s.volumeSurgePoints = clampPts(s.volumeSurgePoints)
+        s.volumeShrinkPoints = clampPts(s.volumeShrinkPoints)
+        s.foreignBuyStreakPoints = clampPts(s.foreignBuyStreakPoints)
+        s.foreignSellStreakPoints = clampPts(s.foreignSellStreakPoints)
+        s.trustBuyStreakPoints = clampPts(s.trustBuyStreakPoints)
+        s.trustSellStreakPoints = clampPts(s.trustSellStreakPoints)
+        s.rsiBullishDivPoints = clampPts(s.rsiBullishDivPoints)
+        s.rsiBearishDivPoints = clampPts(s.rsiBearishDivPoints)
+        s.macdBullishDivPoints = clampPts(s.macdBullishDivPoints)
+        s.macdBearishDivPoints = clampPts(s.macdBearishDivPoints)
+        s.candleHighBullishPoints = clampPts(s.candleHighBullishPoints)
+        s.candleHighBearishPoints = clampPts(s.candleHighBearishPoints)
+        s.candleMedBullishPoints = clampPts(s.candleMedBullishPoints)
+        s.candleMedBearishPoints = clampPts(s.candleMedBearishPoints)
+        s.candleLowBullishPoints = clampPts(s.candleLowBullishPoints)
+        s.candleLowBearishPoints = clampPts(s.candleLowBearishPoints)
+        s.near52WeekLowPoints = clampPts(s.near52WeekLowPoints)
+        s.near52WeekHighPoints = clampPts(s.near52WeekHighPoints)
+        // 折扣百分比
+        s.sidewaysDiscountPct = max(0, min(s.sidewaysDiscountPct, 100))
+        // 法人累計
+        s.foreignCumulativeLargeThreshold = max(100, min(s.foreignCumulativeLargeThreshold, 100000))
+        s.foreignCumulativeLargePoints = clampPts(s.foreignCumulativeLargePoints)
+        s.foreignCumulativeSmallThreshold = max(10, min(s.foreignCumulativeSmallThreshold, 50000))
+        s.foreignCumulativeSmallPoints = clampPts(s.foreignCumulativeSmallPoints)
+        s.trustCumulativeLargeThreshold = max(100, min(s.trustCumulativeLargeThreshold, 50000))
+        s.trustCumulativeLargePoints = clampPts(s.trustCumulativeLargePoints)
+        s.trustCumulativeSmallThreshold = max(10, min(s.trustCumulativeSmallThreshold, 20000))
+        s.trustCumulativeSmallPoints = clampPts(s.trustCumulativeSmallPoints)
+        // 融資融券
+        s.marginIncreasePoints = clampPts(s.marginIncreasePoints)
+        s.marginDecreasePoints = clampPts(s.marginDecreasePoints)
+        s.shortIncreasePoints = clampPts(s.shortIncreasePoints)
+        s.shortDecreasePoints = clampPts(s.shortDecreasePoints)
+        s.marginChangeThreshold = max(10, min(s.marginChangeThreshold, 10000))
+        // 分組上限
+        s.trendGroupCap = max(1, min(s.trendGroupCap, 50))
+        s.momentumGroupCap = max(1, min(s.momentumGroupCap, 50))
+        return s
     }
 }

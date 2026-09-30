@@ -18,6 +18,9 @@ struct TradingFeeSettings: Codable, Equatable, Sendable {
     /// 是否顯示壓力/支撐價位（預設關閉）
     var supportResistanceEnabled: Bool = false
 
+    // MARK: - 版本（Codable 向後相容）
+    var version: Int = 1
+
     // MARK: - Defaults
 
     static let defaults = TradingFeeSettings()
@@ -26,10 +29,17 @@ struct TradingFeeSettings: Codable, Equatable, Sendable {
 
     /// 從 UserDefaults 讀取，找不到則回傳預設值
     static func load() -> TradingFeeSettings {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let settings = try? JSONDecoder().decode(TradingFeeSettings.self, from: data)
-        else { return .defaults }
-        return settings
+        guard let data = UserDefaults.standard.data(forKey: storageKey) else {
+            return .defaults
+        }
+        do {
+            return try JSONDecoder().decode(TradingFeeSettings.self, from: data).clamped()
+        } catch {
+            #if DEBUG
+            print("[TradingFeeSettings] 解碼失敗，使用預設值: \(error)")
+            #endif
+            return .defaults
+        }
     }
 
     /// 儲存至 UserDefaults
@@ -42,6 +52,15 @@ struct TradingFeeSettings: Codable, Equatable, Sendable {
     /// 恢復預設（移除儲存的設定）
     static func resetToDefaults() {
         UserDefaults.standard.removeObject(forKey: storageKey)
+    }
+
+    /// 將所有數值夾到合理範圍
+    func clamped() -> TradingFeeSettings {
+        var s = self
+        s.commissionRate = max(0, min(s.commissionRate, 0.01))
+        s.taxRate = max(0, min(s.taxRate, 0.01))
+        s.trailingStopPct = max(1, min(s.trailingStopPct, 50))
+        return s
     }
 
     // MARK: - 費用計算

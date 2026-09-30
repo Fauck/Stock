@@ -41,6 +41,9 @@ struct TechnicalSettings: Codable, Equatable, Sendable {
     var volumeShrinkMultiplier: Double = 0.5
     var volumeMAPeriod: Int = 20
 
+    // MARK: - 版本（Codable 向後相容）
+    var version: Int = 1
+
     // MARK: - Defaults
 
     static let defaults = TechnicalSettings()
@@ -49,10 +52,17 @@ struct TechnicalSettings: Codable, Equatable, Sendable {
 
     /// 從 UserDefaults 讀取，找不到則回傳預設值
     static func load() -> TechnicalSettings {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let settings = try? JSONDecoder().decode(TechnicalSettings.self, from: data)
-        else { return .defaults }
-        return settings
+        guard let data = UserDefaults.standard.data(forKey: storageKey) else {
+            return .defaults
+        }
+        do {
+            return try JSONDecoder().decode(TechnicalSettings.self, from: data).clamped()
+        } catch {
+            #if DEBUG
+            print("[TechnicalSettings] 解碼失敗，使用預設值: \(error)")
+            #endif
+            return .defaults
+        }
     }
 
     /// 儲存至 UserDefaults
@@ -65,5 +75,33 @@ struct TechnicalSettings: Codable, Equatable, Sendable {
     /// 恢復預設（移除儲存的設定）
     static func resetToDefaults() {
         UserDefaults.standard.removeObject(forKey: storageKey)
+    }
+
+    /// 將所有數值夾到合理範圍
+    func clamped() -> TechnicalSettings {
+        var s = self
+        s.maShortPeriod = max(1, min(s.maShortPeriod, 100))
+        s.maLongPeriod = max(2, min(s.maLongPeriod, 500))
+        s.rsiPeriod = max(2, min(s.rsiPeriod, 100))
+        s.rsiOverbought = max(50, min(s.rsiOverbought, 100))
+        s.rsiOversold = max(0, min(s.rsiOversold, 50))
+        s.kdjPeriod = max(2, min(s.kdjPeriod, 100))
+        s.kdjKSmooth = max(1, min(s.kdjKSmooth, 20))
+        s.kdjDSmooth = max(1, min(s.kdjDSmooth, 20))
+        s.macdFastPeriod = max(2, min(s.macdFastPeriod, 100))
+        s.macdSlowPeriod = max(2, min(s.macdSlowPeriod, 200))
+        s.macdSignalPeriod = max(2, min(s.macdSignalPeriod, 100))
+        s.bollingerPeriod = max(2, min(s.bollingerPeriod, 100))
+        s.bollingerMultiplier = max(0.5, min(s.bollingerMultiplier, 5.0))
+        s.bollingerSqueezeThreshold = max(0.01, min(s.bollingerSqueezeThreshold, 0.5))
+        s.bollingerNearBandThreshold = max(0.005, min(s.bollingerNearBandThreshold, 0.2))
+        s.atrPeriod = max(2, min(s.atrPeriod, 100))
+        s.adxPeriod = max(2, min(s.adxPeriod, 100))
+        s.adxStrongThreshold = max(10, min(s.adxStrongThreshold, 50))
+        s.volumeSurgeMultiplier = max(1.1, min(s.volumeSurgeMultiplier, 10.0))
+        s.volumeHighMultiplier = max(1.0, min(s.volumeHighMultiplier, 5.0))
+        s.volumeShrinkMultiplier = max(0.1, min(s.volumeShrinkMultiplier, 0.9))
+        s.volumeMAPeriod = max(2, min(s.volumeMAPeriod, 100))
+        return s
     }
 }

@@ -61,39 +61,41 @@ actor StockService {
             throw StockServiceError.invalidURL
         }
 
-        var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
-        request.timeoutInterval = 10
+        return try await withRetry {
+            var request = URLRequest(url: url)
+            request.setValue(self.apiKey, forHTTPHeaderField: "X-API-KEY")
+            request.timeoutInterval = 10
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw StockServiceError.invalidResponse
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw StockServiceError.invalidResponse
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                throw StockServiceError.httpError(httpResponse.statusCode)
+            }
+
+            let quote = try JSONDecoder().decode(QuoteResponse.self, from: data)
+
+            // 優先順序：lastPrice → closePrice → previousClose
+            let bestPrice = [quote.lastPrice, quote.closePrice, quote.previousClose]
+                .compactMap { $0 }
+                .first { $0 > 0 }
+
+            guard let price = bestPrice else {
+                throw StockServiceError.noPrice
+            }
+
+            return StockQuoteResult(
+                symbol: quote.symbol ?? symbol,
+                name: quote.name ?? symbol,
+                lastPrice: price,
+                previousClose: quote.previousClose,
+                change: quote.change,
+                changePercent: quote.changePercent
+            )
         }
-
-        guard httpResponse.statusCode == 200 else {
-            throw StockServiceError.httpError(httpResponse.statusCode)
-        }
-
-        let quote = try JSONDecoder().decode(QuoteResponse.self, from: data)
-
-        // 優先順序：lastPrice → closePrice → previousClose
-        let bestPrice = [quote.lastPrice, quote.closePrice, quote.previousClose]
-            .compactMap { $0 }
-            .first { $0 > 0 }
-
-        guard let price = bestPrice else {
-            throw StockServiceError.noPrice
-        }
-
-        return StockQuoteResult(
-            symbol: quote.symbol ?? symbol,
-            name: quote.name ?? symbol,
-            lastPrice: price,
-            previousClose: quote.previousClose,
-            change: quote.change,
-            changePercent: quote.changePercent
-        )
     }
 
     /// 取得股票基本資訊（含中文名稱）
@@ -103,21 +105,23 @@ actor StockService {
             throw StockServiceError.invalidURL
         }
 
-        var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
-        request.timeoutInterval = 10
+        return try await withRetry {
+            var request = URLRequest(url: url)
+            request.setValue(self.apiKey, forHTTPHeaderField: "X-API-KEY")
+            request.timeoutInterval = 10
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw StockServiceError.invalidResponse
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw StockServiceError.invalidResponse
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                throw StockServiceError.httpError(httpResponse.statusCode)
+            }
+
+            return try JSONDecoder().decode(TickerResponse.self, from: data)
         }
-
-        guard httpResponse.statusCode == 200 else {
-            throw StockServiceError.httpError(httpResponse.statusCode)
-        }
-
-        return try JSONDecoder().decode(TickerResponse.self, from: data)
     }
 
     /// 取得歷史 K 線資料（最多回溯 1 年）
@@ -131,27 +135,29 @@ actor StockService {
             throw StockServiceError.invalidURL
         }
 
-        var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
-        request.timeoutInterval = 15
+        return try await withRetry {
+            var request = URLRequest(url: url)
+            request.setValue(self.apiKey, forHTTPHeaderField: "X-API-KEY")
+            request.timeoutInterval = 15
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw StockServiceError.invalidResponse
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw StockServiceError.invalidResponse
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                throw StockServiceError.httpError(httpResponse.statusCode)
+            }
+
+            let result = try JSONDecoder().decode(HistoricalCandlesResponse.self, from: data)
+
+            guard !result.data.isEmpty else {
+                throw StockServiceError.noData
+            }
+
+            return result
         }
-
-        guard httpResponse.statusCode == 200 else {
-            throw StockServiceError.httpError(httpResponse.statusCode)
-        }
-
-        let result = try JSONDecoder().decode(HistoricalCandlesResponse.self, from: data)
-
-        guard !result.data.isEmpty else {
-            throw StockServiceError.noData
-        }
-
-        return result
     }
 
     // MARK: - Intraday Trades & Volumes API
@@ -194,15 +200,17 @@ actor StockService {
         let urlString = "\(baseURL)/intraday/trades/\(symbol)?limit=\(limit)&sort=desc"
         guard let url = URL(string: urlString) else { throw StockServiceError.invalidURL }
 
-        var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
-        request.timeoutInterval = 10
+        return try await withRetry {
+            var request = URLRequest(url: url)
+            request.setValue(self.apiKey, forHTTPHeaderField: "X-API-KEY")
+            request.timeoutInterval = 10
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
-        guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
+            guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
 
-        return try JSONDecoder().decode(IntradayTradesResponse.self, from: data)
+            return try JSONDecoder().decode(IntradayTradesResponse.self, from: data)
+        }
     }
 
     /// 取得當日分價量統計
@@ -210,15 +218,17 @@ actor StockService {
         let urlString = "\(baseURL)/intraday/volumes/\(symbol)"
         guard let url = URL(string: urlString) else { throw StockServiceError.invalidURL }
 
-        var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
-        request.timeoutInterval = 10
+        return try await withRetry {
+            var request = URLRequest(url: url)
+            request.setValue(self.apiKey, forHTTPHeaderField: "X-API-KEY")
+            request.timeoutInterval = 10
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
-        guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
+            guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
 
-        return try JSONDecoder().decode(IntradayVolumesResponse.self, from: data)
+            return try JSONDecoder().decode(IntradayVolumesResponse.self, from: data)
+        }
     }
 
     // MARK: - Historical Stats API
@@ -237,15 +247,17 @@ actor StockService {
         let urlString = "\(baseURL)/historical/stats/\(symbol)"
         guard let url = URL(string: urlString) else { throw StockServiceError.invalidURL }
 
-        var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
-        request.timeoutInterval = 10
+        return try await withRetry {
+            var request = URLRequest(url: url)
+            request.setValue(self.apiKey, forHTTPHeaderField: "X-API-KEY")
+            request.timeoutInterval = 10
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
-        guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
+            guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
 
-        return try JSONDecoder().decode(StatsResponse.self, from: data)
+            return try JSONDecoder().decode(StatsResponse.self, from: data)
+        }
     }
 
     // MARK: - Snapshot API
@@ -285,15 +297,17 @@ actor StockService {
         let urlString = "\(baseURL)/snapshot/movers/\(market)?direction=\(direction)&change=\(change)&type=COMMONSTOCK"
         guard let url = URL(string: urlString) else { throw StockServiceError.invalidURL }
 
-        var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
-        request.timeoutInterval = 10
+        return try await withRetry {
+            var request = URLRequest(url: url)
+            request.setValue(self.apiKey, forHTTPHeaderField: "X-API-KEY")
+            request.timeoutInterval = 10
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
-        guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
+            guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
 
-        return try JSONDecoder().decode(SnapshotResponse.self, from: data)
+            return try JSONDecoder().decode(SnapshotResponse.self, from: data)
+        }
     }
 
     /// 成交量/成交值排行
@@ -307,15 +321,17 @@ actor StockService {
         let urlString = "\(baseURL)/snapshot/actives/\(market)?trade=\(trade)&type=COMMONSTOCK"
         guard let url = URL(string: urlString) else { throw StockServiceError.invalidURL }
 
-        var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-KEY")
-        request.timeoutInterval = 10
+        return try await withRetry {
+            var request = URLRequest(url: url)
+            request.setValue(self.apiKey, forHTTPHeaderField: "X-API-KEY")
+            request.timeoutInterval = 10
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
-        guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw StockServiceError.invalidResponse }
+            guard http.statusCode == 200 else { throw StockServiceError.httpError(http.statusCode) }
 
-        return try JSONDecoder().decode(SnapshotResponse.self, from: data)
+            return try JSONDecoder().decode(SnapshotResponse.self, from: data)
+        }
     }
 
     /// 批次取得多檔即時報價
@@ -407,39 +423,41 @@ actor StockService {
             throw StockServiceError.invalidURL
         }
 
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
+        return try await withRetry {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 15
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw StockServiceError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw StockServiceError.httpError(http.statusCode)
-        }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw StockServiceError.invalidResponse
+            }
+            guard http.statusCode == 200 else {
+                throw StockServiceError.httpError(http.statusCode)
+            }
 
-        let decoded = try JSONDecoder().decode(TWSEInstitutionalResponse.self, from: data)
-        guard decoded.stat == "OK", let rows = decoded.data, !rows.isEmpty else {
-            throw StockServiceError.noData
-        }
+            let decoded = try JSONDecoder().decode(TWSEInstitutionalResponse.self, from: data)
+            guard decoded.stat == "OK", let rows = decoded.data, !rows.isEmpty else {
+                throw StockServiceError.noData
+            }
 
-        var result: [String: InstitutionalDayData] = [:]
-        for row in rows where row.count >= 19 {
-            let code = row[0].trimmingCharacters(in: .whitespaces)
-            let foreignNet = Self.parseShares(row[4])
-            let trustNet = Self.parseShares(row[10])
-            let dealerNet = Self.parseShares(row[11])
-            let totalNet = Self.parseShares(row[18])
+            var result: [String: InstitutionalDayData] = [:]
+            for row in rows where row.count >= 19 {
+                let code = row[0].trimmingCharacters(in: .whitespaces)
+                let foreignNet = Self.parseShares(row[4])
+                let trustNet = Self.parseShares(row[10])
+                let dealerNet = Self.parseShares(row[11])
+                let totalNet = Self.parseShares(row[18])
 
-            result[code] = InstitutionalDayData(
-                date: date,
-                foreignNet: foreignNet,
-                trustNet: trustNet,
-                dealerNet: dealerNet,
-                totalNet: totalNet
-            )
+                result[code] = InstitutionalDayData(
+                    date: date,
+                    foreignNet: foreignNet,
+                    trustNet: trustNet,
+                    dealerNet: dealerNet,
+                    totalNet: totalNet
+                )
+            }
+            return result
         }
-        return result
     }
 
     /// 解析帶逗號的股數字串，轉為張數（除以 1000）
@@ -480,50 +498,52 @@ actor StockService {
             throw StockServiceError.invalidURL
         }
 
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
+        return try await withRetry {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 15
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw StockServiceError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw StockServiceError.httpError(http.statusCode)
-        }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw StockServiceError.invalidResponse
+            }
+            guard http.statusCode == 200 else {
+                throw StockServiceError.httpError(http.statusCode)
+            }
 
-        let decoded = try JSONDecoder().decode(TPExInstitutionalResponse.self, from: data)
-        guard let rows = decoded.tables?.first?.data, !rows.isEmpty else {
-            throw StockServiceError.noData
-        }
+            let decoded = try JSONDecoder().decode(TPExInstitutionalResponse.self, from: data)
+            guard let rows = decoded.tables?.first?.data, !rows.isEmpty else {
+                throw StockServiceError.noData
+            }
 
-        // TPEx 24 欄位格式：
-        // [0] 代號, [1] 名稱
-        // [2-4] 外資及陸資(不含自營商) buy/sell/net
-        // [5-7] 外資自營商 buy/sell/net
-        // [8-10] 外資及陸資合計 buy/sell/net → net = [10]
-        // [11-13] 投信 buy/sell/net → net = [13]
-        // [14-16] 自營商(自行買賣) buy/sell/net
-        // [17-19] 自營商(避險) buy/sell/net
-        // [20-22] 自營商合計 buy/sell/net → net = [22]
-        // [23] 三大法人合計
-        var result: [String: InstitutionalDayData] = [:]
-        for row in rows where row.count >= 24 {
-            let code = row[0].trimmingCharacters(in: .whitespaces)
-            guard !code.isEmpty else { continue }
-            let foreignNet = Self.parseShares(row[10])
-            let trustNet = Self.parseShares(row[13])
-            let dealerNet = Self.parseShares(row[22])
-            let totalNet = Self.parseShares(row[23])
+            // TPEx 24 欄位格式：
+            // [0] 代號, [1] 名稱
+            // [2-4] 外資及陸資(不含自營商) buy/sell/net
+            // [5-7] 外資自營商 buy/sell/net
+            // [8-10] 外資及陸資合計 buy/sell/net → net = [10]
+            // [11-13] 投信 buy/sell/net → net = [13]
+            // [14-16] 自營商(自行買賣) buy/sell/net
+            // [17-19] 自營商(避險) buy/sell/net
+            // [20-22] 自營商合計 buy/sell/net → net = [22]
+            // [23] 三大法人合計
+            var result: [String: InstitutionalDayData] = [:]
+            for row in rows where row.count >= 24 {
+                let code = row[0].trimmingCharacters(in: .whitespaces)
+                guard !code.isEmpty else { continue }
+                let foreignNet = Self.parseShares(row[10])
+                let trustNet = Self.parseShares(row[13])
+                let dealerNet = Self.parseShares(row[22])
+                let totalNet = Self.parseShares(row[23])
 
-            result[code] = InstitutionalDayData(
-                date: date,
-                foreignNet: foreignNet,
-                trustNet: trustNet,
-                dealerNet: dealerNet,
-                totalNet: totalNet
-            )
+                result[code] = InstitutionalDayData(
+                    date: date,
+                    foreignNet: foreignNet,
+                    trustNet: trustNet,
+                    dealerNet: dealerNet,
+                    totalNet: totalNet
+                )
+            }
+            return result
         }
-        return result
     }
 
     // MARK: - 融資融券（信用交易）
@@ -590,51 +610,53 @@ actor StockService {
             throw StockServiceError.invalidURL
         }
 
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
+        return try await withRetry {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 15
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw StockServiceError.invalidResponse
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw StockServiceError.invalidResponse
+            }
+            guard http.statusCode == 200 else {
+                throw StockServiceError.httpError(http.statusCode)
+            }
+
+            let decoded = try JSONDecoder().decode(TWSEMarginResponse.self, from: data)
+            // 第二張表（index 1）為個股融資融券明細
+            guard decoded.stat == "OK",
+                  let tables = decoded.tables, tables.count >= 2,
+                  let rows = tables[1].data, !rows.isEmpty else {
+                throw StockServiceError.noData
+            }
+
+            // TWSE 欄位（16 欄）：
+            // [0] 代號, [1] 名稱
+            // 融資: [2] 買進, [3] 賣出, [4] 現金償還, [5] 前日餘額, [6] 今日餘額, [7] 限額
+            // 融券: [8] 買進, [9] 賣出, [10] 現券償還, [11] 前日餘額, [12] 今日餘額, [13] 限額
+            // [14] 資券互抵, [15] 註記
+            var result: [String: MarginTradingDayData] = [:]
+            for row in rows where row.count >= 16 {
+                let code = row[0].trimmingCharacters(in: .whitespaces)
+                guard !code.isEmpty else { continue }
+
+                let marginBalance = Self.parseMarginInt(row[6])
+                let prevMarginBalance = Self.parseMarginInt(row[5])
+                let shortBalance = Self.parseMarginInt(row[12])
+                let prevShortBalance = Self.parseMarginInt(row[11])
+                let offset = Self.parseMarginInt(row[14])
+
+                result[code] = MarginTradingDayData(
+                    date: date,
+                    marginBuyBalance: marginBalance,
+                    marginBuyChange: marginBalance - prevMarginBalance,
+                    shortSellBalance: shortBalance,
+                    shortSellChange: shortBalance - prevShortBalance,
+                    dayTradeOffset: offset
+                )
+            }
+            return result
         }
-        guard http.statusCode == 200 else {
-            throw StockServiceError.httpError(http.statusCode)
-        }
-
-        let decoded = try JSONDecoder().decode(TWSEMarginResponse.self, from: data)
-        // 第二張表（index 1）為個股融資融券明細
-        guard decoded.stat == "OK",
-              let tables = decoded.tables, tables.count >= 2,
-              let rows = tables[1].data, !rows.isEmpty else {
-            throw StockServiceError.noData
-        }
-
-        // TWSE 欄位（16 欄）：
-        // [0] 代號, [1] 名稱
-        // 融資: [2] 買進, [3] 賣出, [4] 現金償還, [5] 前日餘額, [6] 今日餘額, [7] 限額
-        // 融券: [8] 買進, [9] 賣出, [10] 現券償還, [11] 前日餘額, [12] 今日餘額, [13] 限額
-        // [14] 資券互抵, [15] 註記
-        var result: [String: MarginTradingDayData] = [:]
-        for row in rows where row.count >= 16 {
-            let code = row[0].trimmingCharacters(in: .whitespaces)
-            guard !code.isEmpty else { continue }
-
-            let marginBalance = Self.parseMarginInt(row[6])
-            let prevMarginBalance = Self.parseMarginInt(row[5])
-            let shortBalance = Self.parseMarginInt(row[12])
-            let prevShortBalance = Self.parseMarginInt(row[11])
-            let offset = Self.parseMarginInt(row[14])
-
-            result[code] = MarginTradingDayData(
-                date: date,
-                marginBuyBalance: marginBalance,
-                marginBuyChange: marginBalance - prevMarginBalance,
-                shortSellBalance: shortBalance,
-                shortSellChange: shortBalance - prevShortBalance,
-                dayTradeOffset: offset
-            )
-        }
-        return result
     }
 
     /// TPEx 融資融券 API 回應
@@ -662,54 +684,103 @@ actor StockService {
             throw StockServiceError.invalidURL
         }
 
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
+        return try await withRetry {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 15
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw StockServiceError.invalidResponse
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw StockServiceError.invalidResponse
+            }
+            guard http.statusCode == 200 else {
+                throw StockServiceError.httpError(http.statusCode)
+            }
+
+            let decoded = try JSONDecoder().decode(TPExMarginResponse.self, from: data)
+            guard let rows = decoded.tables?.first?.data, !rows.isEmpty else {
+                throw StockServiceError.noData
+            }
+
+            // TPEx 欄位（20 欄）：
+            // [0] 代號, [1] 名稱
+            // 融資: [2] 前餘額, [3] 資買, [4] 資賣, [5] 現償, [6] 資餘額, [7] 資屬證金, [8] 使用率, [9] 限額
+            // 融券: [10] 前餘額, [11] 券賣, [12] 券買, [13] 券償, [14] 券餘額, [15] 券屬證金, [16] 使用率, [17] 限額
+            // [18] 資券相抵, [19] 備註
+            var result: [String: MarginTradingDayData] = [:]
+            for row in rows where row.count >= 19 {
+                let code = row[0].trimmingCharacters(in: .whitespaces)
+                guard !code.isEmpty else { continue }
+
+                let marginBalance = Self.parseMarginInt(row[6])
+                let prevMarginBalance = Self.parseMarginInt(row[2])
+                let shortBalance = Self.parseMarginInt(row[14])
+                let prevShortBalance = Self.parseMarginInt(row[10])
+                let offset = Self.parseMarginInt(row[18])
+
+                result[code] = MarginTradingDayData(
+                    date: date,
+                    marginBuyBalance: marginBalance,
+                    marginBuyChange: marginBalance - prevMarginBalance,
+                    shortSellBalance: shortBalance,
+                    shortSellChange: shortBalance - prevShortBalance,
+                    dayTradeOffset: offset
+                )
+            }
+            return result
         }
-        guard http.statusCode == 200 else {
-            throw StockServiceError.httpError(http.statusCode)
-        }
-
-        let decoded = try JSONDecoder().decode(TPExMarginResponse.self, from: data)
-        guard let rows = decoded.tables?.first?.data, !rows.isEmpty else {
-            throw StockServiceError.noData
-        }
-
-        // TPEx 欄位（20 欄）：
-        // [0] 代號, [1] 名稱
-        // 融資: [2] 前餘額, [3] 資買, [4] 資賣, [5] 現償, [6] 資餘額, [7] 資屬證金, [8] 使用率, [9] 限額
-        // 融券: [10] 前餘額, [11] 券賣, [12] 券買, [13] 券償, [14] 券餘額, [15] 券屬證金, [16] 使用率, [17] 限額
-        // [18] 資券相抵, [19] 備註
-        var result: [String: MarginTradingDayData] = [:]
-        for row in rows where row.count >= 19 {
-            let code = row[0].trimmingCharacters(in: .whitespaces)
-            guard !code.isEmpty else { continue }
-
-            let marginBalance = Self.parseMarginInt(row[6])
-            let prevMarginBalance = Self.parseMarginInt(row[2])
-            let shortBalance = Self.parseMarginInt(row[14])
-            let prevShortBalance = Self.parseMarginInt(row[10])
-            let offset = Self.parseMarginInt(row[18])
-
-            result[code] = MarginTradingDayData(
-                date: date,
-                marginBuyBalance: marginBalance,
-                marginBuyChange: marginBalance - prevMarginBalance,
-                shortSellBalance: shortBalance,
-                shortSellChange: shortBalance - prevShortBalance,
-                dayTradeOffset: offset
-            )
-        }
-        return result
     }
 
     /// 解析帶逗號的整數字串（融資融券資料已是張數，不需除以 1000）
     private static func parseMarginInt(_ str: String) -> Int {
         let cleaned = str.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
         return Int(cleaned) ?? 0
+    }
+
+    // MARK: - Retry with Exponential Backoff
+
+    /// 判斷錯誤是否值得重試（暫態錯誤）
+    private func isRetryable(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut, .networkConnectionLost, .notConnectedToInternet:
+                return true
+            default:
+                return false
+            }
+        }
+        if case StockServiceError.httpError(let code) = error, (500...599).contains(code) {
+            return true
+        }
+        return false
+    }
+
+    /// 帶指數退避的重試機制
+    /// - Parameters:
+    ///   - maxAttempts: 最大嘗試次數（預設 3）
+    ///   - initialDelay: 初始延遲秒數（預設 1.0）
+    ///   - operation: 要執行的非同步操作
+    private func withRetry<T>(
+        maxAttempts: Int = 3,
+        initialDelay: TimeInterval = 1.0,
+        _ operation: () async throws -> T
+    ) async throws -> T {
+        var lastError: Error?
+        for attempt in 0..<maxAttempts {
+            do {
+                return try await operation()
+            } catch {
+                lastError = error
+                guard attempt < maxAttempts - 1, isRetryable(error) else {
+                    throw error
+                }
+                let delay = initialDelay * pow(2.0, Double(attempt))
+                try await Task.sleep(for: .seconds(delay))
+                #if DEBUG
+                print("[StockService] 重試第 \(attempt + 1) 次，延遲 \(delay)s：\(error.localizedDescription)")
+                #endif
+            }
+        }
+        throw lastError!
     }
 }
 

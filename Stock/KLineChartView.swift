@@ -1147,14 +1147,6 @@ private struct ChartLayout {
     }
 }
 
-// MARK: - Safe Array Subscript
-
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
-    }
-}
-
 // MARK: - Preview
 
 #Preview {
