@@ -7,6 +7,8 @@ final class CalendarViewModel {
     var selectedDate: Date = Date()
     var currentMonth: Date = Date()
     var showingAddSheet: Bool = false
+    /// 點擊有紀錄的日格時，設定此值以彈出摘要視窗
+    var daySummary: DaySummary?
 
     // MARK: - Constants
     let weekdaySymbols = ["日", "一", "二", "三", "四", "五", "六"]
@@ -63,7 +65,7 @@ final class CalendarViewModel {
     }
 
     /// 該日期的賣出紀錄（從所有已平倉紀錄中篩選，包含部分賣出拆分紀錄）
-    func sellRecordsOnDate(_ date: Date) -> [Investment] {
+    func sellRecordsOnDate(_ date: Date)  -> [Investment] {
         closedInvestments.filter { inv in
             guard let sellDate = inv.sellDate else { return false }
             return calendar.isDate(sellDate, inSameDayAs: date)
@@ -123,6 +125,90 @@ final class CalendarViewModel {
     /// 查詢 Investment 對應的 TradeJournal
     func journal(for investmentID: UUID) -> TradeJournal? {
         journals.first { $0.investmentID == investmentID }
+    }
+
+    // MARK: - 日格損益
+
+    /// 該日期的已實現損益合計（無賣出紀錄回傳 nil）
+    func realizedPnLOnDate(_ date: Date) -> Double? {
+        let sells = sellRecordsOnDate(date)
+        guard !sells.isEmpty else { return nil }
+        let fees = TradingFeeSettings.load()
+        return sells.reduce(0.0) { $0 + $1.realizedProfitLoss(fees: fees) }
+    }
+
+    // MARK: - 日摘要
+
+    struct DaySummaryItem: Identifiable {
+        let id = UUID()
+        let ticker: String
+        let displayName: String
+        let type: TradeType
+        let quantity: Double
+        let price: Double
+        let pnl: Double?
+
+        enum TradeType { case buy, sell }
+    }
+
+    struct DaySummary: Identifiable {
+        let id = UUID()
+        let date: Date
+        let items: [DaySummaryItem]
+        let totalPnL: Double?
+        let buyCount: Int
+        let sellCount: Int
+    }
+
+    /// 產生指定日期的交易摘要
+    func daySummary(for date: Date) -> DaySummary? {
+        let buys = buyRecordsOnDate(date)
+        let sells = sellRecordsOnDate(date)
+        guard !buys.isEmpty || !sells.isEmpty else { return nil }
+
+        let fees = TradingFeeSettings.load()
+        var items: [DaySummaryItem] = []
+
+        for inv in buys {
+            items.append(DaySummaryItem(
+                ticker: inv.ticker,
+                displayName: StockMapping.displayName(for: inv.ticker),
+                type: .buy,
+                quantity: inv.originalQuantity,
+                price: inv.buyPrice,
+                pnl: nil
+            ))
+        }
+
+        for inv in sells {
+            let pl = inv.realizedProfitLoss(fees: fees)
+            items.append(DaySummaryItem(
+                ticker: inv.ticker,
+                displayName: StockMapping.displayName(for: inv.ticker),
+                type: .sell,
+                quantity: inv.sellQuantity ?? inv.originalQuantity,
+                price: inv.sellPrice ?? 0,
+                pnl: pl
+            ))
+        }
+
+        let totalPnL: Double? = sells.isEmpty ? nil : sells.reduce(0.0) { $0 + $1.realizedProfitLoss(fees: fees) }
+
+        return DaySummary(
+            date: date,
+            items: items,
+            totalPnL: totalPnL,
+            buyCount: buys.count,
+            sellCount: sells.count
+        )
+    }
+
+    /// 點擊日格時的處理：有紀錄時彈出摘要，否則只選擇日期
+    func handleDayTap(_ date: Date) {
+        selectedDate = date
+        if let summary = daySummary(for: date) {
+            daySummary = summary
+        }
     }
 
     // MARK: - Date Comparison Helpers

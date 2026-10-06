@@ -43,6 +43,34 @@ final class Investment {
     /// 賣出時大盤狀態（V2 新增，舊資料預設 nil）
     var sellMarketCondition: String?
 
+    /// 輸入驗證錯誤
+    enum ValidationError: LocalizedError {
+        case emptyTicker
+        case invalidBuyPrice
+        case invalidQuantity
+
+        var errorDescription: String? {
+            switch self {
+            case .emptyTicker: return "標的代號不可為空"
+            case .invalidBuyPrice: return "買入價格必須大於 0"
+            case .invalidQuantity: return "數量必須大於 0"
+            }
+        }
+    }
+
+    /// 驗證輸入值（供 UI 層在建立前呼叫）
+    static func validate(ticker: String, buyPrice: Double, quantity: Double) throws {
+        guard !ticker.trimmingCharacters(in: .whitespaces).isEmpty else {
+            throw ValidationError.emptyTicker
+        }
+        guard buyPrice > 0 else {
+            throw ValidationError.invalidBuyPrice
+        }
+        guard quantity > 0 else {
+            throw ValidationError.invalidQuantity
+        }
+    }
+
     init(
         id: UUID = UUID(),
         ticker: String,
@@ -59,12 +87,18 @@ final class Investment {
         buyMarketCondition: MarketCondition? = nil,
         sellMarketCondition: MarketCondition? = nil
     ) {
+        // 防禦性驗證：對新建立（非已平倉）的紀錄 clamp 不合理數值
+        // 已平倉紀錄的 quantity 可能為 0（合法狀態）
+        let safeBuyPrice = max(buyPrice, 0.01)
+        let safeQuantity = isClosed ? max(quantity, 0) : max(quantity, 1)
+        let safeTicker = ticker.trimmingCharacters(in: .whitespaces).isEmpty ? "UNKNOWN" : ticker
+
         self.id = id
-        self.ticker = ticker
+        self.ticker = safeTicker
         self.buyDate = buyDate
-        self.buyPrice = buyPrice
-        self.originalQuantity = quantity
-        self.quantity = quantity
+        self.buyPrice = safeBuyPrice
+        self.originalQuantity = safeQuantity
+        self.quantity = safeQuantity
         self.isClosed = isClosed
         self.sellPrice = sellPrice
         self.sellDate = sellDate
@@ -178,10 +212,22 @@ final class Investment {
         }
     }
 
-    /// 刪除此筆紀錄，並清除相關的部分賣出拆分紀錄
+    /// 刪除此筆紀錄，並清除相關的部分賣出拆分紀錄（原子性操作）
     /// - 若為原始買入紀錄：同時刪除所有由此紀錄拆分出的 partialSellRecord
     /// - 若為部分賣出拆分紀錄：將賣出數量歸還給原始紀錄
+    /// - 任何步驟失敗時 rollback 所有暫存變更，確保資料一致性
     static func deleteInvestment(_ investment: Investment, context: ModelContext) throws {
+        do {
+            try performDelete(investment, context: context)
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    /// 內部刪除實作（不含 save/rollback，由外層統一處理）
+    private static func performDelete(_ investment: Investment, context: ModelContext) throws {
         // 清除關聯的 TradeJournal（避免孤兒資料）
         let investmentID = investment.id
         let journalDescriptor = FetchDescriptor<TradeJournal>(

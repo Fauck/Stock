@@ -14,22 +14,16 @@ enum CandleFetchService {
 
     // MARK: - Cache Read / Write
 
-    /// 讀取當日 K 線快取。若日期不符或 decode 失敗，回傳 nil。
+    /// 讀取當日 K 線快取。若日期不符或版本不符，回傳 nil。
     static func readCandleCache(forDate todayCacheStr: String) -> [String: CandleCacheData]? {
-        guard let cachedDate = UserDefaults.standard.string(forKey: CandleCacheKeys.date),
-              cachedDate == todayCacheStr,
-              let data = UserDefaults.standard.data(forKey: CandleCacheKeys.data),
-              let cached = try? JSONDecoder().decode([String: CandleCacheData].self, from: data)
-        else { return nil }
-        return cached
+        CacheManager.read([String: CandleCacheData].self,
+                          forKey: CacheManager.Keys.candle,
+                          validDate: todayCacheStr)
     }
 
     /// 寫入 K 線快取
     static func writeCandleCache(_ cache: [String: CandleCacheData], forDate todayCacheStr: String) {
-        if let encoded = try? JSONEncoder().encode(cache) {
-            UserDefaults.standard.set(encoded, forKey: CandleCacheKeys.data)
-            UserDefaults.standard.set(todayCacheStr, forKey: CandleCacheKeys.date)
-        }
+        CacheManager.write(cache, forKey: CacheManager.Keys.candle, dateKey: todayCacheStr)
     }
 
     /// 今日快取日期鍵 "yyyyMMdd"

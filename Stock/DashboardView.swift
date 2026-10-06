@@ -148,9 +148,15 @@ struct DashboardView: View {
                 overviewCard
                     .padding(.horizontal, 16)
 
-                // Section 2: 損益趨勢
-                if !vm.monthlyPnLData.isEmpty {
-                    monthlyPnLChartCard
+                // Section 2: 累積損益曲線
+                if vm.cumulativePnLData.count >= 2 {
+                    cumulativePnLCard
+                        .padding(.horizontal, 16)
+                }
+
+                // Section 2b: 週期損益
+                if !vm.periodPnLData.isEmpty {
+                    periodPnLChartCard
                         .padding(.horizontal, 16)
                 }
 
@@ -238,30 +244,124 @@ struct DashboardView: View {
             HStack(spacing: 0) {
                 statCell(title: "最佳單筆", value: String(format: "+$%.0f", vm.bestTrade), color: AppColor.softUp)
                 statCell(title: "最差單筆", value: String(format: "$%.0f", vm.worstTrade), color: AppColor.softDown)
-                statCell(title: "", value: "", color: .clear)
+                statCell(title: "最大回撤",
+                         value: vm.maxDrawdown > 0 ? String(format: "-$%.0f", vm.maxDrawdown) : "—",
+                         color: vm.maxDrawdown > 0 ? AppColor.softDown : AppColor.textSecondary)
             }
         }
         .cardStyle()
     }
 
-    // MARK: - Section 2a：月損益圖
+    // MARK: - Section 2：累積損益曲線
 
-    private var monthlyPnLChartCard: some View {
+    private var cumulativePnLCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
-                Image(systemName: "chart.bar.fill")
+                Image(systemName: "chart.line.uptrend.xyaxis")
                     .font(.warmCaption2())
                     .foregroundStyle(AppColor.primary)
-                Text("月度損益")
+                Text("累積損益曲線")
                     .font(.warmCaption())
                     .foregroundStyle(AppColor.textSecondary)
                 Spacer()
             }
 
             Chart {
-                ForEach(vm.monthlyPnLData) { point in
+                ForEach(vm.cumulativePnLData) { point in
+                    LineMark(
+                        x: .value("日期", point.date),
+                        y: .value("累積損益", point.cumulativePnL)
+                    )
+                    .foregroundStyle(AppColor.primary)
+                    .interpolationMethod(.catmullRom)
+
+                    AreaMark(
+                        x: .value("日期", point.date),
+                        yStart: .value("底", 0),
+                        yEnd: .value("累積損益", point.cumulativePnL)
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [AppColor.primary.opacity(0.2), AppColor.primary.opacity(0.02)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .interpolationMethod(.catmullRom)
+                }
+
+                RuleMark(y: .value("零線", 0))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .foregroundStyle(AppColor.textSecondary.opacity(0.5))
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading) { value in
+                    AxisValueLabel {
+                        if let v = value.as(Double.self) {
+                            Text(formatAmount(v))
+                                .font(.warmCaption2())
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+                    }
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                        .foregroundStyle(AppColor.divider)
+                }
+            }
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: 4)) { value in
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            Text(AppDateFormatter.shortMonthDay.string(from: date))
+                                .font(.warmCaption2())
+                                .foregroundStyle(AppColor.textSecondary)
+                        }
+                    }
+                }
+            }
+            .frame(height: 200)
+        }
+        .cardStyle()
+    }
+
+    // MARK: - Section 2b：週期損益圖（月/季/年）
+
+    private var periodPnLChartCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.warmCaption2())
+                    .foregroundStyle(AppColor.primary)
+                Text("損益趨勢")
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+                Spacer()
+
+                // 月/季/年切換
+                HStack(spacing: 0) {
+                    ForEach(PeriodMode.allCases) { mode in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                vm.periodMode = mode
+                            }
+                        } label: {
+                            Text(mode.rawValue)
+                                .font(.warmCaption2())
+                                .fontWeight(.semibold)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(vm.periodMode == mode ? AppColor.primary : Color.clear)
+                                .foregroundStyle(vm.periodMode == mode ? .white : AppColor.textSecondary)
+                        }
+                    }
+                }
+                .background(AppColor.background)
+                .clipShape(Capsule())
+            }
+
+            Chart {
+                ForEach(vm.periodPnLData) { point in
                     BarMark(
-                        x: .value("月份", point.label),
+                        x: .value("期間", point.label),
                         y: .value("損益", point.pnl)
                     )
                     .foregroundStyle(point.pnl >= 0 ? AppColor.softUp : AppColor.softDown)
@@ -299,16 +399,15 @@ struct DashboardView: View {
             }
             .frame(height: 220)
 
-            // 月度明細
+            // 明細列表
             VStack(spacing: 6) {
-                ForEach(vm.monthlyPnLData) { point in
+                ForEach(vm.periodPnLData) { point in
                     HStack(spacing: 8) {
                         Text(point.label)
                             .font(.warmSecondaryData())
                             .foregroundStyle(AppColor.textMain)
-                            .frame(width: 52, alignment: .leading)
+                            .frame(width: 62, alignment: .leading)
 
-                        // 勝率小條
                         GeometryReader { geo in
                             let winPct = point.tradeCount > 0
                                 ? CGFloat(point.winCount) / CGFloat(point.tradeCount) : 0

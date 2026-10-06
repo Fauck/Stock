@@ -46,6 +46,10 @@ struct StockApp: App {
         }
     }()
 
+    init() {
+        CacheManager.migrateFromLegacyKeysIfNeeded()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

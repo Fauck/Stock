@@ -98,6 +98,23 @@ enum TickerRankTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// 累積損益資料點
+struct CumulativePnLPoint: Identifiable {
+    let id = UUID()
+    let date: Date
+    let cumulativePnL: Double
+}
+
+/// 週期損益資料點（月/季/年通用）
+struct PeriodPnLPoint: Identifiable {
+    let id = UUID()
+    let label: String
+    let periodStart: Date
+    let pnl: Double
+    let tradeCount: Int
+    let winCount: Int
+}
+
 // MARK: - ViewModel
 
 @Observable
@@ -113,6 +130,7 @@ final class DashboardViewModel {
     var selectedFilter: DateFilterOption = .all
     var customStartDate: Date = Calendar.current.date(byAdding: .month, value: -3, to: Date()) ?? Date()
     var customEndDate: Date = Date()
+    var periodMode: PeriodMode = .monthly
 
     // MARK: - Private
 
@@ -201,6 +219,31 @@ final class DashboardViewModel {
 
     // MARK: - Section 2：損益趨勢
 
+    /// 累積損益曲線（按 sellDate 排序逐筆加總）
+    var cumulativePnLData: [CumulativePnLPoint] {
+        let sorted = filteredInvestments.sorted { ($0.sellDate ?? .distantPast) < ($1.sellDate ?? .distantPast) }
+        var running = 0.0
+        return sorted.compactMap { inv -> CumulativePnLPoint? in
+            guard let date = inv.sellDate else { return nil }
+            running += inv.realizedProfitLoss(fees: fees)
+            return CumulativePnLPoint(date: date, cumulativePnL: running)
+        }
+    }
+
+    /// 最大回撤金額（從累積損益曲線的峰值到谷值的最大跌幅）
+    var maxDrawdown: Double {
+        let data = cumulativePnLData
+        guard !data.isEmpty else { return 0 }
+        var peak = data[0].cumulativePnL
+        var maxDD = 0.0
+        for point in data {
+            if point.cumulativePnL > peak { peak = point.cumulativePnL }
+            let dd = peak - point.cumulativePnL
+            if dd > maxDD { maxDD = dd }
+        }
+        return maxDD
+    }
+
     var monthlyPnLData: [MonthlyPnLPoint] {
         let calendar = Calendar.current
         let grouped = Dictionary(grouping: filteredInvestments) { inv -> DateComponents in
@@ -216,6 +259,58 @@ final class DashboardViewModel {
                 label: String(format: "%d/%02d", year, month),
                 periodStart: periodStart, pnl: pnl,
                 tradeCount: investments.count, winCount: wins
+            )
+        }
+        .sorted { $0.periodStart < $1.periodStart }
+    }
+
+    /// 週期損益資料（根據 periodMode 分組：月/季/年）
+    var periodPnLData: [PeriodPnLPoint] {
+        let calendar = Calendar.current
+
+        let grouped: [DateComponents: [Investment]]
+        switch periodMode {
+        case .monthly:
+            grouped = Dictionary(grouping: filteredInvestments) { inv in
+                guard let sd = inv.sellDate else { return DateComponents() }
+                return calendar.dateComponents([.year, .month], from: sd)
+            }
+        case .quarterly:
+            grouped = Dictionary(grouping: filteredInvestments) { inv in
+                guard let sd = inv.sellDate else { return DateComponents() }
+                let comps = calendar.dateComponents([.year, .month], from: sd)
+                guard let month = comps.month else { return DateComponents() }
+                let quarter = ((month - 1) / 3) * 3 + 1
+                return DateComponents(year: comps.year, month: quarter)
+            }
+        case .yearly:
+            grouped = Dictionary(grouping: filteredInvestments) { inv in
+                guard let sd = inv.sellDate else { return DateComponents() }
+                return calendar.dateComponents([.year], from: sd)
+            }
+        }
+
+        return grouped.compactMap { comps, investments -> PeriodPnLPoint? in
+            guard let periodStart = calendar.date(from: comps) else { return nil }
+            let pnl = investments.reduce(0.0) { $0 + $1.realizedProfitLoss(fees: fees) }
+            let wins = investments.filter { $0.realizedProfitLoss(fees: fees) > 0 }.count
+
+            let label: String
+            switch periodMode {
+            case .monthly:
+                guard let y = comps.year, let m = comps.month else { return nil }
+                label = String(format: "%d/%02d", y, m)
+            case .quarterly:
+                guard let y = comps.year, let m = comps.month else { return nil }
+                label = "\(y) Q\((m - 1) / 3 + 1)"
+            case .yearly:
+                guard let y = comps.year else { return nil }
+                label = "\(y)"
+            }
+
+            return PeriodPnLPoint(
+                label: label, periodStart: periodStart,
+                pnl: pnl, tradeCount: investments.count, winCount: wins
             )
         }
         .sorted { $0.periodStart < $1.periodStart }

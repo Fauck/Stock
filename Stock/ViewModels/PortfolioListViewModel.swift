@@ -73,15 +73,7 @@ final class PortfolioListViewModel {
     private var fetchTask: Task<Void, Never>?
     private var loadDataTask: Task<Void, Never>?
 
-    // MARK: - 快取鍵
-    private static let weekStatsCacheKey = "weekStatsCache"
-    private static let weekStatsCacheDateKey = "weekStatsCacheDate"
-    private static let institutionalCacheKey = "institutionalCache"
-    private static let institutionalCacheDateKey = "institutionalCacheDate"
-    private static let marginCacheKey = "marginCache"
-    private static let marginCacheDateKey = "marginCacheDate"
-    private static let candleCacheKey = CandleCacheKeys.data
-    private static let candleCacheDateKey = CandleCacheKeys.date
+    // MARK: - 快取鍵（統一由 CacheManager.Keys 管理）
 
     /// 上次成功載入的日期（用於判斷重新整理是否需要重抓）
     private var lastLoadDate: String?
@@ -536,10 +528,9 @@ final class PortfolioListViewModel {
         // 嘗試讀取快取
         var existingCache: [String: CodableWeekStats] = [:]
         if !forceRefresh,
-           let cachedDate = UserDefaults.standard.string(forKey: Self.weekStatsCacheDateKey),
-           cachedDate == todayStr,
-           let data = UserDefaults.standard.data(forKey: Self.weekStatsCacheKey),
-           let cached = try? JSONDecoder().decode([String: CodableWeekStats].self, from: data) {
+           let cached = CacheManager.read([String: CodableWeekStats].self,
+                                          forKey: CacheManager.Keys.weekStats,
+                                          validDate: todayStr) {
             existingCache = cached
             for (ticker, stats) in cached {
                 market.weekStats[ticker] = WeekStats(high52w: stats.high, low52w: stats.low)
@@ -598,10 +589,7 @@ final class PortfolioListViewModel {
         }
 
         // 寫回快取
-        if let encoded = try? JSONEncoder().encode(mergedCache) {
-            UserDefaults.standard.set(encoded, forKey: Self.weekStatsCacheKey)
-            UserDefaults.standard.set(todayStr, forKey: Self.weekStatsCacheDateKey)
-        }
+        CacheManager.write(mergedCache, forKey: CacheManager.Keys.weekStats, dateKey: todayStr)
 
         guard !Task.isCancelled else { return }
         market.isFetchingWeekStats = false
@@ -618,10 +606,9 @@ final class PortfolioListViewModel {
         // 嘗試讀取快取
         var existingCache: [String: CodableInstitutionalSummary] = [:]
         if !forceRefresh,
-           let cachedDate = UserDefaults.standard.string(forKey: Self.institutionalCacheDateKey),
-           cachedDate == todayStr,
-           let data = UserDefaults.standard.data(forKey: Self.institutionalCacheKey),
-           let cached = try? JSONDecoder().decode([String: CodableInstitutionalSummary].self, from: data) {
+           let cached = CacheManager.read([String: CodableInstitutionalSummary].self,
+                                          forKey: CacheManager.Keys.institutional,
+                                          validDate: todayStr) {
             existingCache = cached
             for (ticker, summary) in cached {
                 market.institutionalData[ticker] = summary.toSummary()
@@ -731,10 +718,7 @@ final class PortfolioListViewModel {
         }
 
         // 寫回快取
-        if let encoded = try? JSONEncoder().encode(mergedCache) {
-            UserDefaults.standard.set(encoded, forKey: Self.institutionalCacheKey)
-            UserDefaults.standard.set(todayStr, forKey: Self.institutionalCacheDateKey)
-        }
+        CacheManager.write(mergedCache, forKey: CacheManager.Keys.institutional, dateKey: todayStr)
 
         guard !Task.isCancelled else { return }
         market.isFetchingInstitutional = false
@@ -750,10 +734,9 @@ final class PortfolioListViewModel {
         // 嘗試讀取快取
         var existingCache: [String: CodableMarginSummary] = [:]
         if !forceRefresh,
-           let cachedDate = UserDefaults.standard.string(forKey: Self.marginCacheDateKey),
-           cachedDate == todayStr,
-           let data = UserDefaults.standard.data(forKey: Self.marginCacheKey),
-           let cached = try? JSONDecoder().decode([String: CodableMarginSummary].self, from: data) {
+           let cached = CacheManager.read([String: CodableMarginSummary].self,
+                                          forKey: CacheManager.Keys.margin,
+                                          validDate: todayStr) {
             existingCache = cached
             for (ticker, summary) in cached {
                 market.marginData[ticker] = summary.toSummary()
@@ -858,10 +841,7 @@ final class PortfolioListViewModel {
         }
 
         // 寫回快取
-        if let encoded = try? JSONEncoder().encode(mergedCache) {
-            UserDefaults.standard.set(encoded, forKey: Self.marginCacheKey)
-            UserDefaults.standard.set(todayStr, forKey: Self.marginCacheDateKey)
-        }
+        CacheManager.write(mergedCache, forKey: CacheManager.Keys.margin, dateKey: todayStr)
 
         guard !Task.isCancelled else { return }
         market.isFetchingMargin = false

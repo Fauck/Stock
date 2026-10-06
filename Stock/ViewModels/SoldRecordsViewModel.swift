@@ -36,10 +36,11 @@ struct PnLSummary {
     )
 }
 
-/// 月度/季度切換
+/// 損益週期模式（月/季/年）
 enum PeriodMode: String, CaseIterable, Identifiable {
-    case monthly = "月度"
-    case quarterly = "季度"
+    case monthly   = "月"
+    case quarterly = "季"
+    case yearly    = "年"
 
     var id: String { rawValue }
 }
@@ -146,19 +147,28 @@ final class SoldRecordsViewModel {
                 let quarter = ((comps.month ?? 1) - 1) / 3
                 return DateComponents(year: comps.year, month: quarter * 3 + 1)
             }
+        case .yearly:
+            grouped = Dictionary(grouping: filteredInvestments) { inv in
+                guard let sellDate = inv.sellDate else { return DateComponents() }
+                return calendar.dateComponents([.year], from: sellDate)
+            }
         }
 
         return grouped.compactMap { comps, investments -> PeriodPnL? in
-            guard let year = comps.year, let month = comps.month else { return nil }
+            guard let year = comps.year else { return nil }
             guard let periodStart = calendar.date(from: comps) else { return nil }
 
             let label: String
             switch periodMode {
             case .monthly:
+                guard let month = comps.month else { return nil }
                 label = String(format: "%d/%02d", year, month)
             case .quarterly:
+                guard let month = comps.month else { return nil }
                 let q = (month - 1) / 3 + 1
                 label = "\(year) Q\(q)"
+            case .yearly:
+                label = "\(year)"
             }
 
             let pnl = investments.reduce(0.0) { $0 + $1.realizedProfitLoss(fees: fees) }

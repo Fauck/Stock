@@ -9,9 +9,3 @@ struct CandleCacheData: Codable {
     let lows: [Double]
     let volumes: [Int]
 }
-
-/// K 線快取 UserDefaults 鍵名
-enum CandleCacheKeys {
-    static let data = "candleCache"
-    static let date = "candleCacheDate"
-}

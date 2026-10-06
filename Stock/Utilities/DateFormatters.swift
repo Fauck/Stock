@@ -64,4 +64,12 @@ enum AppDateFormatter {
         f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }()
+
+    /// "M/d" — 圖表 X 軸用（精簡月日）
+    static let shortMonthDay: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_TW")
+        f.dateFormat = "M/d"
+        return f
+    }()
 }

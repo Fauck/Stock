@@ -86,6 +86,11 @@ struct CalendarView: View {
                     }
                 }
             }
+            .sheet(item: $vm.daySummary) { summary in
+                daySummarySheet(summary)
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+            }
         }
     }
 
@@ -217,7 +222,7 @@ struct CalendarView: View {
                     dayCell(for: date)
                 } else {
                     Text("")
-                        .frame(height: 42)
+                        .frame(height: 54)
                 }
             }
         }
@@ -229,34 +234,43 @@ struct CalendarView: View {
         let isToday = vm.isDateToday(date)
         let hasBuy = !vm.buyRecordsOnDate(date).isEmpty
         let hasSell = !vm.sellRecordsOnDate(date).isEmpty
+        let pnl = vm.realizedPnLOnDate(date)
 
         return Button {
-            vm.selectedDate = date
+            vm.handleDayTap(date)
         } label: {
-            VStack(spacing: 3) {
+            VStack(spacing: 2) {
                 Text("\(vm.dayComponent(from: date))")
                     .font(.system(.callout, design: .rounded, weight: isToday ? .bold : .regular))
                     .foregroundStyle(isSelected ? .white : (isToday ? AppColor.primary : AppColor.textMain))
 
-                // 買入 / 賣出圓點指示器
-                HStack(spacing: 3) {
-                    if hasBuy {
-                        Circle()
-                            .fill(isSelected ? .white.opacity(0.8) : AppColor.softUp)
-                            .frame(width: 5, height: 5)
-                    }
-                    if hasSell {
-                        Circle()
-                            .fill(isSelected ? .white.opacity(0.8) : AppColor.softDown)
-                            .frame(width: 5, height: 5)
-                    }
-                    if !hasBuy && !hasSell {
-                        Color.clear.frame(width: 5, height: 5)
+                // 有已實現損益 → 顯示金額；否則顯示圓點指示器
+                if let pnl {
+                    Text(formatCellAmount(pnl))
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(isSelected ? .white.opacity(0.9) : Color.profitLossColor(pnl))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                } else {
+                    HStack(spacing: 3) {
+                        if hasBuy {
+                            Circle()
+                                .fill(isSelected ? .white.opacity(0.8) : AppColor.softUp)
+                                .frame(width: 5, height: 5)
+                        }
+                        if hasSell {
+                            Circle()
+                                .fill(isSelected ? .white.opacity(0.8) : AppColor.softDown)
+                                .frame(width: 5, height: 5)
+                        }
+                        if !hasBuy && !hasSell {
+                            Color.clear.frame(width: 5, height: 5)
+                        }
                     }
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 42)
+            .frame(height: 54)
             .background(
                 RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous)
                     .fill(isSelected ? AppColor.primary : Color.clear)
@@ -267,6 +281,17 @@ struct CalendarView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    /// 日格內損益金額格式化（無條件捨去）
+    private func formatCellAmount(_ value: Double) -> String {
+        let sign = value >= 0 ? "+" : "-"
+        let abs = abs(value)
+        if abs >= 10000 {
+            let truncated = floor(abs / 1000) / 10  // 無條件捨去到小數一位
+            return "\(sign)\(String(format: "%.1f", truncated))萬"
+        }
+        return "\(sign)\(Int(floor(abs)))"
     }
 
     // MARK: - 選擇日期的紀錄列表
@@ -482,6 +507,89 @@ struct CalendarView: View {
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.field, style: .continuous))
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - 日摘要彈窗
+
+    private func daySummarySheet(_ summary: CalendarViewModel.DaySummary) -> some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    // 統計摘要
+                    HStack(spacing: 0) {
+                        if summary.buyCount > 0 {
+                            summaryItem(label: "買入", value: "\(summary.buyCount) 筆", color: AppColor.softUp)
+                        }
+                        if summary.sellCount > 0 {
+                            summaryItem(label: "賣出", value: "\(summary.sellCount) 筆", color: AppColor.softDown)
+                        }
+                        if let pnl = summary.totalPnL {
+                            summaryItem(
+                                label: "已實現",
+                                value: "\(pnl >= 0 ? "+" : "")$\(formatAmount(abs(pnl)))",
+                                color: Color.profitLossColor(pnl)
+                            )
+                        }
+                    }
+                    .cardStyle()
+
+                    // 逐筆明細
+                    VStack(spacing: 8) {
+                        ForEach(summary.items) { item in
+                            daySummaryRow(item)
+                        }
+                    }
+                    .cardStyle()
+                }
+                .padding(.vertical, 8)
+            }
+            .background(AppColor.background.ignoresSafeArea())
+            .navigationTitle(vm.dateString(from: summary.date))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarBackground(AppColor.primary, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("關閉") { vm.daySummary = nil }
+                }
+            }
+        }
+    }
+
+    private func daySummaryRow(_ item: CalendarViewModel.DaySummaryItem) -> some View {
+        HStack {
+            // 買/賣標籤
+            Text(item.type == .buy ? "買" : "賣")
+                .font(.warmCaption2())
+                .fontWeight(.bold)
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(item.type == .buy ? AppColor.softUp : AppColor.softDown)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.displayName)
+                    .font(.warmSubheadline())
+                    .foregroundStyle(AppColor.textMain)
+                Text(String(format: "%.0f 股 × $%.2f", item.quantity, item.price))
+                    .font(.warmCaption())
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            Spacer()
+
+            if let pnl = item.pnl {
+                Text("\(pnl >= 0 ? "+" : "")$\(String(format: "%.0f", pnl))")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.profitLossColor(pnl))
+            } else {
+                Text(String(format: "$%.0f", item.price * item.quantity))
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - 情緒分數 Badge
